@@ -1,0 +1,48 @@
+﻿Appearance - Help
+=================
+
+Appearance changes the visual presentation of the R4OS Desktop.
+
+Desktop colors
+--------------
+
+Use the Background and Icon text tabs to choose which Desktop color is
+being edited. Choose one of the 16 color squares, or enter a custom color
+in the RGB color field. A custom color consists of exactly six hexadecimal
+digits: two for red, two for green and two for blue. Example: 008080 is the
+classic R4OS teal.
+
+The preview shows both colors before they are saved. Selected Desktop icons
+always keep white text on a blue selection background so that their labels
+remain readable.
+
+Desktop wallpaper
+-----------------
+
+Browse opens the shared file dialog and shows folders plus supported BMP
+files. The first wallpaper version accepts uncompressed 24-bit and 32-bit
+BMP files up to 4096 x 2160 pixels. The image is shown pixel-for-pixel,
+centered on the Desktop and is not scaled.
+
+Choose None to remove the wallpaper and use only the selected background
+color. Missing, unreadable, damaged or unsupported files are rejected. If a
+configured file is unavailable during startup, the Desktop safely keeps the
+background color.
+
+Apply
+  Saves both selected colors and the wallpaper and updates the Desktop
+  immediately.
+
+OK
+  Saves both selected colors and the wallpaper, updates the Desktop and closes
+  Appearance.
+
+Cancel
+  Closes Appearance without saving any changes made since the last Apply.
+
+Keyboard
+--------
+
+Tab and Shift+Tab move between controls. Arrow keys switch tabs or select a
+color square. Enter activates the focused control. Escape closes the
+application.
