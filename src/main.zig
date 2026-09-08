@@ -787,10 +787,15 @@ fn selfTestFail(ctx: *const r4os.r4sys.Context, label: []const u8) i32 {
 }
 
 fn saveAppearanceConfig(ctx: *const r4os.r4sys.Context, path: [*:0]const u8, color: []const u8, icon_text: []const u8, wallpaper: []const u8) i32 {
+    const recovered = r4std.config.recoverDocumentSave(ctx, path);
+    if (recovered < 0) return recovered;
     var existing: [r4std.config.max_file_bytes]u8 = undefined;
     const read = ctx.fileRead(path, existing[0..]);
-    const has_existing = read > 0 and read <= @as(i32, @intCast(existing.len));
+    if (read == -5 or read > existing.len) return r4std.config.error_buffer_too_small;
+    if (read < 0 and read != -3) return r4std.config.error_read_failed;
+    const has_existing = read >= 0;
     const existing_bytes = if (has_existing) existing[0..@as(usize, @intCast(read))] else existing[0..0];
+    _ = r4std.settings.parseSystemText(existing_bytes) catch return r4std.config.error_invalid_value;
 
     var output: [r4std.config.max_output_bytes]u8 = undefined;
     var writer = r4std.settings.Writer.init(output[0..]);

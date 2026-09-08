@@ -21,3 +21,12 @@ Selbsttest:
 
 Der Selbsttest prueft RGB- und Benachrichtigungsformat sowie die atomare
 Aktualisierung von DESKTOP_BG unter Erhalt eines fremden Schluessels.
+
+
+Appearance: Konfiguration ab 0.78.63
+---------------------------------
+Vor einer Aenderung von DESKTOP.R4S wird R4STD-Recovery abgeschlossen und
+der wiederhergestellte Inhalt gelesen. Lese-/Groessenfehler verhindern das
+Speichern. Die vier Appearance-Werte werden gemeinsam komponiert; andere
+Schluessel wie TASKBAR_CLOCK und UI_FONT bleiben erhalten. Publikation
+verwendet weiterhin R4STD CONFIG_V1 saveDocument.

@@ -4,7 +4,7 @@
 
 ## Package
 
-- Version: `0.1.5`
+- Version: `0.1.7`
 - Image target: `/R4OS/SOFTWARE/DESKTOP/APPEARANCE.R4X`
 - Image scope: `full`
 - Canonical project manifest: `module.R4MF`
@@ -38,3 +38,12 @@ Detailed German technical notes from the migration are preserved in
 Original R4OS material is licensed under Apache License 2.0. See `LICENSE`
 and `NOTICE`. Any repository-specific external material is documented in
 `THIRD_PARTY_NOTICES.md`.
+
+
+Appearance: Konfiguration ab 0.78.63
+---------------------------------
+Vor einer Aenderung von DESKTOP.R4S wird R4STD-Recovery abgeschlossen und
+der wiederhergestellte Inhalt gelesen. Lese-/Groessenfehler verhindern das
+Speichern. Die vier Appearance-Werte werden gemeinsam komponiert; andere
+Schluessel wie TASKBAR_CLOCK und UI_FONT bleiben erhalten. Publikation
+verwendet weiterhin R4STD CONFIG_V1 saveDocument.
