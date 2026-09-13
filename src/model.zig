@@ -1,5 +1,9 @@
 const std = @import("std");
 
+test "display selection retains common ownership and waits for real decisions" {
+    try @import("display_control_test.zig").exercise();
+}
+
 pub const default_desktop_bg: u32 = 0x008080;
 pub const default_desktop_icon_text: u32 = 0xFFFFFF;
 pub const background_signal_prefix = "R4OS_APPEARANCE_BG=";

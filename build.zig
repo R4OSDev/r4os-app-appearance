@@ -18,6 +18,7 @@ pub fn build(b: *std.Build) void {
             .optimize = .Debug,
         }),
     });
+    model_tests.root_module.addImport("r4os", sdk.createR4osModule(b.graph.host, .Debug));
     const run_model_tests = b.addRunArtifact(model_tests);
     const test_step = b.step("test", "Run Appearance model tests");
     test_step.dependOn(&run_model_tests.step);

@@ -4,6 +4,20 @@
 APPEARANCE.R4X ist die Desktop-Einstellungsanwendung fuer die Darstellung
 von R4OS. Sie wird ueber Start -> Settings -> Appearance geoeffnet.
 
+Version 0.1.8: Start -> Settings -> Display beziehungsweise /DISPLAY oeffnet
+die Moduswahl. Der gemeinsame Katalog liefert progressive SDR-Modi des
+aktiven Ausgangs. Die App fuellt einen SYSTEM-Puffer mit Farbbalken,
+Graustufen und Schachbrett, prueft Atomic und reicht den Wechsel ein.
+Danach schliesst sie nur ihre Referenz; der Displaybesitzer haelt den Puffer.
+Keep bestaetigt, Revert/Escape/Fensterschliessen fordern Rueckkehr an.
+Der gemeinsame Systemtimer kehrt ohne Bestaetigung nach 15 Sekunden zurueck;
+Treiberquittungen bestimmen den angezeigten Abschluss. Ohne Modusfaehigkeit
+bleibt die feste Bootausgabe bestehen. Keine Speicherung fuer den Neustart.
+Die vorhandenen Modelltests pruefen Besitz, Ablehnung und Entscheidungen;
+physische NVIDIA-Abnahme bleibt in ExFiles/Reports/OssiGPU.txt offen.
+
+Die folgenden Abschnitte dokumentieren die bisherige Appearance-Funktion.
+
 Version 0.1.0 verwaltet die Desktop-Hintergrundfarbe. Die Anwendung bietet
 eine Vorschau, 16 klassische Farbfelder und eine direkte Eingabe als sechs
 hexadezimale RGB-Ziffern. Apply speichert, OK speichert und schliesst,

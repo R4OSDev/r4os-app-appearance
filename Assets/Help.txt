@@ -3,6 +3,23 @@
 
 Appearance changes the visual presentation of the R4OS Desktop.
 
+Display settings
+----------------
+
+Start > Settings > Display opens resolution and refresh rate selection.
+It can also be opened with APPEARANCE.R4X /DISPLAY. The active display
+driver supplies progressive SDR modes. A fixed boot display shows an
+explanation; Refresh reads the current list again.
+
+Use the arrows to choose a mode and Test mode to apply it. Check the image
+and the color, grayscale and checkerboard preview. Keep confirms the change
+for this session; Revert or Escape restores the previous mode. Without
+confirmation the system returns automatically after 15 seconds. Closing
+the window requests return unless confirmation is already running.
+Tab moves between buttons; Enter or Space activates the focused button.
+The pattern is a visual aid, not a calibrated color measurement.
+Confirmed modes are not yet saved for the next boot.
+
 Desktop colors
 --------------
 

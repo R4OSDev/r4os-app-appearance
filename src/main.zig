@@ -55,6 +55,7 @@ pub fn r4_app_main(r4_app: *r4os.App) i32 {
     if (!r4std.init(r4_app.startContext())) return r4os.abi.err_no_group;
     var ctx = AppApi.init(r4_app) orelse return r4os.abi.err_no_group;
     if (hasArg(ctx.sys.argsRaw(), "/SELFTEST")) return runSelfTest(&ctx.sys);
+    if (hasArg(ctx.sys.argsRaw(), "/DISPLAY")) return @import("display_ui.zig").run(ctx.sys, ctx.desk, ctx.draw);
     var app = App{ .ctx = &ctx };
     return app.run();
 }
@@ -151,8 +152,8 @@ const App = struct {
     fn updateMetrics(self: *App) void {
         var info: r4os.abi.GuiWindowInfo = .{};
         _ = self.ctx.desk.guiWindowInfo(&info);
-        self.w = clampI32(info.client_w, 480, 900);
-        self.h = clampI32(info.client_h, 400, 760);
+        self.w = @max(info.client_w, 480);
+        self.h = @max(info.client_h, 400);
     }
 
     fn render(self: *App) void {

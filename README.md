@@ -4,13 +4,28 @@
 
 ## Package
 
-- Version: `0.1.7`
+- Version: `0.1.8`
 - Image target: `/R4OS/SOFTWARE/DESKTOP/APPEARANCE.R4X`
 - Image scope: `full`
 - Canonical project manifest: `module.R4MF`
 
 The manifest is the single source of truth for the artifact, imports, image
 target, and package metadata.
+
+`/DISPLAY` opens display settings, also available from the Desktop Settings
+menu. It uses the common output catalog and asynchronous atomic mode API,
+initializes an SDR test-pattern buffer and releases its creator reference
+after submission. The common owner keeps accepted references and the 15-second
+confirmation timer. Keep, Revert, Escape and window close follow that same
+transaction; completion requires driver receipts. Only progressive RGB8 modes
+on one active switchable output are offered. Bootfb displays a fixed-mode
+explanation. Settings apply for the current session; physical NVIDIA image
+acceptance remains in `ExFiles/Reports/OssiGPU.txt`.
+
+The existing model test step covers source ownership, rejected requests,
+confirmation and close during a pending change using a modeled ABI transport.
+Display settings uses bounded buffered Canvas commands and the full client
+dimensions; the main Appearance window also has no fixed maximum size.
 
 ## Build
 
