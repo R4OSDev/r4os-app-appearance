@@ -6,7 +6,7 @@ const control = catalog.control;
 const topology = catalog.topology;
 const a = r4os.abi;
 const Rect = r4os.gui.Rect;
-const Button = enum { monitor, mode_previous, mode_next, scale_down, scale_up, rotate, primary, left, right, above, below, clone, enabled, colors, refresh, apply, keep, revert, close };
+const Button = enum { monitor, mode_previous, mode_next, scale_down, scale_up, rotate, primary, left, right, above, below, clone, enabled, colors, vrr, refresh, apply, keep, revert, close };
 const all_buttons = std.enums.values(Button);
 const scales = [_]u32{ 60, 90, 120, 150, 180, 210, 240, 300, 360, 480 };
 const face = r4os.gui.default_palette.face;
@@ -118,6 +118,7 @@ const App = struct {
             .enabled => idle and !self.edit.outputs[self.selected].primary,
             .apply => idle and self.dirty,
             .colors => idle and self.raw != null and self.edit.outputs[self.selected].key.persistable(),
+            .vrr => idle and self.edit.outputs[self.selected].key.persistable(),
             else => idle,
         };
     }
@@ -137,6 +138,7 @@ const App = struct {
             .clone => .{ .x = self.width - 148, .y = 250, .w = 136, .h = 26 },
             .enabled => .{ .x = 12, .y = 288, .w = 170, .h = 26 },
             .colors => .{ .x = self.width - 148, .y = 288, .w = 136, .h = 26 },
+            .vrr => .{ .x = 190, .y = 288, .w = 134, .h = 26 },
             .refresh, .keep => .{ .x = 12, .y = self.height - 40, .w = 90, .h = 28 },
             .apply, .revert => .{ .x = 112, .y = self.height - 40, .w = 106, .h = 28 },
             .close => .{ .x = self.width - 90, .y = self.height - 40, .w = 78, .h = 28 },
@@ -190,6 +192,11 @@ const App = struct {
             .enabled => value.enabled = !value.enabled,
             .colors => {
                 if (@import("display_color.zig").run(self.sys, self.desk, self.draw, self.raw.?, value.key, &self.client)) { self.exiting = true; return; }
+                _ = self.desk.guiSetTitle("Display settings"); self.metrics(); self.refreshCatalog();
+                return;
+            },
+            .vrr => {
+                if (@import("display_refresh.zig").run(self.sys, self.desk, self.draw, value.key)) { self.exiting = true; return; }
                 _ = self.desk.guiSetTitle("Display settings"); self.metrics(); self.refreshCatalog();
                 return;
             },
@@ -357,7 +364,7 @@ const App = struct {
                 .primary => if (selected.primary) "Primary display" else "Make primary",
                 .left => "Left", .right => "Right", .above => "Above", .below => "Below", .clone => "Clone",
                 .enabled => if (selected.enabled) "Display enabled" else "Enable display", .refresh => "Refresh", .apply => "Test changes",
-                .keep => "Keep", .revert => "Revert", .close => "Close", .colors => "Color settings...",
+                .keep => "Keep", .revert => "Revert", .close => "Close", .colors => "Color settings...", .vrr => "VRR settings...",
             };
             _ = canvas.button(.{ .rect = self.rect(button), .text = label, .focused = self.focus == button,
                 .state = if (!self.enabled(button)) .disabled else if (self.pressed == button) .pressed else .normal,
