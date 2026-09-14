@@ -8,7 +8,7 @@ pub fn build(b: *std.Build) void {
     const libraries_dep = b.dependencyFromBuildZig(libraries_build, .{});
     const sdk = sdk_build.sdk(b, sdk_dep, .{});
     _ = sdk.addR4MFWithOptions(b.path("module.R4MF"), .{
-        .zig_module_roots = &.{libraries_dep.namedLazyPath("r4std_zig_binding"), libraries_dep.namedLazyPath("r4img_zig_binding")},
+        .zig_module_roots = &.{libraries_dep.namedLazyPath("r4std_zig_binding"), libraries_dep.namedLazyPath("r4img_zig_binding"), libraries_dep.namedLazyPath("r4gfx_desktop_outputs")},
     });
 
     const model_tests = b.addTest(.{
@@ -18,7 +18,11 @@ pub fn build(b: *std.Build) void {
             .optimize = .Debug,
         }),
     });
-    model_tests.root_module.addImport("r4os", sdk.createR4osModule(b.graph.host, .Debug));
+    const host = sdk.createR4osModule(b.graph.host, .Debug);
+    model_tests.root_module.addImport("r4os", host);
+    const outputs = b.createModule(.{ .root_source_file = libraries_dep.namedLazyPath("r4gfx_desktop_outputs"), .target = b.graph.host, .optimize = .Debug });
+    outputs.addImport("r4os", host);
+    model_tests.root_module.addImport("r4gfx_desktop_outputs", outputs);
     const run_model_tests = b.addRunArtifact(model_tests);
     const test_step = b.step("test", "Run Appearance model tests");
     test_step.dependOn(&run_model_tests.step);

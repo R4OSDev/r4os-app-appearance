@@ -55,7 +55,7 @@ pub fn r4_app_main(r4_app: *r4os.App) i32 {
     if (!r4std.init(r4_app.startContext())) return r4os.abi.err_no_group;
     var ctx = AppApi.init(r4_app) orelse return r4os.abi.err_no_group;
     if (hasArg(ctx.sys.argsRaw(), "/SELFTEST")) return runSelfTest(&ctx.sys);
-    if (hasArg(ctx.sys.argsRaw(), "/DISPLAY")) return @import("display_ui.zig").run(ctx.sys, ctx.desk, ctx.draw);
+    if (hasArg(ctx.sys.argsRaw(), "/DISPLAY")) return @import("display_ui.zig").run(ctx.sys, ctx.desk, ctx.draw, r4_app.startContext().instance_id);
     var app = App{ .ctx = &ctx };
     return app.run();
 }

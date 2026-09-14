@@ -2,6 +2,7 @@ const std = @import("std");
 
 test "display selection retains common ownership and waits for real decisions" {
     try @import("display_control_test.zig").exercise();
+    try @import("display_settings.zig").exercise();
 }
 
 pub const default_desktop_bg: u32 = 0x008080;
