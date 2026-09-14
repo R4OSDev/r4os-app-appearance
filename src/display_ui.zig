@@ -5,8 +5,8 @@ const a = r4os.abi;
 const Button = enum { previous, next, refresh, apply, keep, revert, close };
 const face = r4os.gui.default_palette.face;
 
-pub fn run(sys: r4os.r4sys.Context, desk: r4os.r4desk.Context, draw: r4os.r4draw.Context, instance: u64) i32 {
-    if (@import("display_settings.zig").run(sys, desk, draw, instance)) |result| return result;
+pub fn run(sys: r4os.r4sys.Context, desk: r4os.r4desk.Context, draw: r4os.r4draw.Context, instance: u64, raw: *const a.R4XStartContext) i32 {
+    if (@import("display_settings.zig").run(sys, desk, draw, instance, raw)) |result| return result;
     var app: App = .{ .sys = sys, .desk = desk, .draw = draw };
     return app.run();
 }

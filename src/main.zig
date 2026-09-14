@@ -55,7 +55,7 @@ pub fn r4_app_main(r4_app: *r4os.App) i32 {
     if (!r4std.init(r4_app.startContext())) return r4os.abi.err_no_group;
     var ctx = AppApi.init(r4_app) orelse return r4os.abi.err_no_group;
     if (hasArg(ctx.sys.argsRaw(), "/SELFTEST")) return runSelfTest(&ctx.sys);
-    if (hasArg(ctx.sys.argsRaw(), "/DISPLAY")) return @import("display_ui.zig").run(ctx.sys, ctx.desk, ctx.draw, r4_app.startContext().instance_id);
+    if (hasArg(ctx.sys.argsRaw(), "/DISPLAY")) return @import("display_ui.zig").run(ctx.sys, ctx.desk, ctx.draw, r4_app.startContext().instance_id, r4_app.startContext());
     var app = App{ .ctx = &ctx };
     return app.run();
 }
@@ -140,13 +140,13 @@ const App = struct {
         if (wallpaper_rc >= 0 and !equalsIgnoreCase(spanZ(wallpaper_value[0..]), "NONE")) {
             const parsed = r4os.path.AbsoluteFilePath.parse(spanZ(wallpaper_value[0..])) catch null;
             if (parsed) |path| {
-                if (model.hasBmpExtension(path.bytes())) setZ(self.wallpaper_path[0..], path.bytes());
+                if (model.hasWallpaperExtension(path.bytes())) setZ(self.wallpaper_path[0..], path.bytes());
             }
         }
         setZ(self.saved_wallpaper_path[0..], spanZ(self.wallpaper_path[0..]));
         self.setCurrentDirFromPath(spanZ(self.wallpaper_path[0..]));
         self.updateRgbText();
-        self.setStatus(if (rc < 0 or icon_rc < 0 or wallpaper_rc < 0) "Could not read desktop settings." else "Choose a desktop color, icon text color or BMP wallpaper.");
+        self.setStatus(if (rc < 0 or icon_rc < 0 or wallpaper_rc < 0) "Could not read desktop settings." else "Choose a desktop color, icon text color or wallpaper.");
     }
 
     fn updateMetrics(self: *App) void {
@@ -178,7 +178,7 @@ const App = struct {
         self.drawSwatches(canvas);
         _ = canvas.label(.{ .rect = .{ .x = 218, .y = 150, .w = 82, .h = 18 }, .text = copyLit(color_label[0..], "RGB color:"), .fg = text_color, .bg = app_bg }, scratch[0..]);
         _ = self.rgb.draw(canvas, self.rgbRect(), scratch[0..]);
-        _ = canvas.label(.{ .rect = .{ .x = 28, .y = 228, .w = 120, .h = 18 }, .text = copyLit(wallpaper_label[0..], "Wallpaper (BMP):"), .fg = text_color, .bg = app_bg }, scratch[0..]);
+        _ = canvas.label(.{ .rect = .{ .x = 28, .y = 228, .w = 120, .h = 18 }, .text = copyLit(wallpaper_label[0..], "Wallpaper:"), .fg = text_color, .bg = app_bg }, scratch[0..]);
         self.drawWallpaperPath(canvas, scratch[0..]);
         self.drawButton(canvas, scratch[0..], self.browseRect(), "Browse...", .browse, false);
         self.drawButton(canvas, scratch[0..], self.noneRect(), "None", .none, false);
@@ -459,7 +459,7 @@ const App = struct {
         self.dialog_first_index = 0;
         self.dialog_hover_index = null;
         self.dialog_pressed_action = .none;
-        self.setStatus("Choose a 24-bit or 32-bit BMP file.");
+        self.setStatus("Choose a BMP or PNG image.");
     }
 
     fn closeWallpaperDialog(self: *App, status_text: []const u8) void {
@@ -474,7 +474,7 @@ const App = struct {
 
     fn loadDirectoryPage(self: *App, number: u32) bool {
         const path = r4os.app_storage.PathZ{ .ptr = zptr(self.current_dir[0..]), .len = @intCast(spanZ(self.current_dir[0..]).len) };
-        if (!self.directory_page.load(.{ .sys = self.ctx.sys }, path, number, ".BMP")) {
+        if (!self.directory_page.load(.{ .sys = self.ctx.sys }, path, number, "")) {
             if (self.directory_page.count != 0) setZ(self.current_dir[0..], spanZ(self.directory_page.directory[0..]));
             return false;
         }
@@ -617,8 +617,8 @@ const App = struct {
     }
 
     fn validateWallpaper(self: *App, path: []const u8) bool {
-        if (!model.hasBmpExtension(path)) {
-            self.setStatus("Only .BMP wallpaper files are supported.");
+        if (!model.hasWallpaperExtension(path)) {
+            self.setStatus("Choose a .BMP or .PNG wallpaper file.");
             return false;
         }
         var path_storage: [path_capacity]u8 = .{0} ** path_capacity;
@@ -628,31 +628,31 @@ const App = struct {
             return false;
         };
         if (info.is_dir != 0 or info.size == 0 or info.size > max_wallpaper_file_bytes) {
-            self.setStatus("The BMP wallpaper is empty or too large.");
+            self.setStatus("The wallpaper image is empty or too large.");
             return false;
         }
         const length: usize = @intCast(info.size);
         const allocator = self.ctx.sys.allocator();
         const bytes = allocator.alloc(u8, length) catch {
-            self.setStatus("Not enough memory to check the BMP wallpaper.");
+            self.setStatus("Not enough memory to check the wallpaper.");
             return false;
         };
         defer allocator.free(bytes);
         const read = self.ctx.sys.fileRead(zptr(path_storage[0..]), bytes);
         if (read != @as(i32, @intCast(length))) {
-            self.setStatus("Could not read the BMP wallpaper.");
+            self.setStatus("Could not read the wallpaper image.");
             return false;
         }
-        const image_info = self.ctx.img.probe(bytes, "image/bmp") catch {
-            self.setStatus("BMP is invalid or unsupported by R4IMG.");
+        const image_info = self.ctx.img.probe(bytes, "") catch {
+            self.setStatus("The wallpaper image is invalid or unsupported.");
             return false;
         };
-        if (image_info.format != .bmp) {
-            self.setStatus("The selected file is not a BMP image.");
+        if (image_info.format != .bmp and image_info.format != .png) {
+            self.setStatus("The selected file is not a BMP or PNG image.");
             return false;
         }
         if (!model.wallpaperDimensionsAllowed(image_info.width, image_info.height)) {
-            self.setStatus("BMP exceeds the 4096 x 2160 wallpaper limit.");
+            self.setStatus("Image exceeds the 4096 x 2160 wallpaper limit.");
             return false;
         }
         return true;

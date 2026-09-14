@@ -55,13 +55,10 @@ pub fn parseBackgroundSignal(text: []const u8) ?u32 {
     return parseRgb24(text[background_signal_prefix.len..]);
 }
 
-pub fn hasBmpExtension(path: []const u8) bool {
+pub fn hasWallpaperExtension(path: []const u8) bool {
     if (path.len < 4) return false;
     const extension = path[path.len - 4 ..];
-    return extension[0] == '.' and
-        asciiUpper(extension[1]) == 'B' and
-        asciiUpper(extension[2]) == 'M' and
-        asciiUpper(extension[3]) == 'P';
+    return std.ascii.eqlIgnoreCase(extension, ".BMP") or std.ascii.eqlIgnoreCase(extension, ".PNG");
 }
 
 pub fn wallpaperDimensionsAllowed(width: u32, height: u32) bool {
@@ -100,11 +97,13 @@ test "background signal has an exact contract" {
     try std.testing.expectEqual(@as(?u32, null), parseBackgroundSignal("R4OS_APPEARANCE_BG=336699X"));
 }
 
-test "wallpaper filter accepts only BMP extensions" {
-    try std.testing.expect(hasBmpExtension("C:\\WALL.BMP"));
-    try std.testing.expect(hasBmpExtension("D:\\Images\\sky.bmp"));
-    try std.testing.expect(!hasBmpExtension("C:\\WALL.PNG"));
-    try std.testing.expect(!hasBmpExtension("BMP"));
+test "wallpaper filter accepts BMP and PNG extensions" {
+    try std.testing.expect(hasWallpaperExtension("C:\\WALL.BMP"));
+    try std.testing.expect(hasWallpaperExtension("D:\\Images\\sky.bmp"));
+    try std.testing.expect(hasWallpaperExtension("C:\\WALL.PNG"));
+    try std.testing.expect(hasWallpaperExtension("D:\\Images\\sky.png"));
+    try std.testing.expect(!hasWallpaperExtension("C:\\WALL.PNG.BAK"));
+    try std.testing.expect(!hasWallpaperExtension("BMP"));
 }
 
 test "wallpaper dimensions include Full HD and enforce the decode bound" {

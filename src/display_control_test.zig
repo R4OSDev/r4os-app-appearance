@@ -119,4 +119,82 @@ pub fn exercise() !void {
     fake.fixed=false; fake.drift=true; fake.revision_calls=0;
     try t.expect(!ui.refresh(&fake) and ui.count==0 and ui.error_code==a.gfx_output_error_stale);
     var pixel: [1]u32 = undefined; control.fillPattern(&pixel,1,1); try t.expectEqual(@as(u32,0xFFFFFF),pixel[0]);
+    try exerciseColor();
+}
+
+// This fixture checks the two-BO transaction and CMM call, not color math.
+// The existing R4GFX/Desktop groups compare actual pixel conversion numerically.
+const gfx = @import("r4gfx");
+const ColorFake = struct {
+    base: Fake = .{},
+    pixels: [24 * 16]u32 = @splat(0),
+    creator: bool = false,
+    mapped: bool = false,
+    releases: u32 = 0,
+    request: a.GfxModeColorRequest = .{},
+    pub fn outputs(self: *ColorFake) *ColorFake { return self; }
+    pub fn revision(self: *ColorFake, out: *a.GfxDisplayRevision) i32 { return self.base.revision(out); }
+    pub fn info(self: *ColorFake, index: u32, out: *a.GfxOutputInfo) i32 { return self.base.info(index, out); }
+    pub fn mode(self: *ColorFake, output: *const a.GfxOutputId, index: u32, out: *a.GfxOutputMode) i32 { return Fake.mode(&self.base, output, index, out); }
+    pub fn gfxBufferCreate(self: *ColorFake, descriptor: *const a.GfxBufferDescriptor, out: *a.GfxBufferReference) i32 {
+        if (descriptor.format == a.gfx_buffer_format_xrgb8888) return self.base.gfxBufferCreate(descriptor, out);
+        std.debug.assert(!self.creator and self.base.mapped and descriptor.format == a.gfx_buffer_format_xrgb2101010 and
+            descriptor.byte_length == self.base.descriptor.byte_length and descriptor.usage == a.gfx_buffer_usage_cpu_write | a.gfx_buffer_usage_transfer_source);
+        self.creator = true;
+        out.* = .{ .reference = .{ .id = 99, .generation = 3 }, .buffer = .{ .id = 199, .generation = 7 } };
+        return a.gfx_buffer_result_ok;
+    }
+    pub fn gfxBufferMap(self: *ColorFake, ref: *const a.GfxBufferHandle, access: u32, offset: u64, bytes: u64, out: *a.GfxBufferMap) i32 {
+        if (ref.id != 99) return self.base.gfxBufferMap(ref, access, offset, bytes, out);
+        std.debug.assert(self.creator and !self.mapped and access == a.gfx_buffer_map_write and offset == 0 and bytes == self.base.descriptor.byte_length);
+        self.mapped = true; out.* = .{ .lease = .{ .id = 99, .generation = 1 }, .cpu_address = @intFromPtr(&self.pixels) }; return a.gfx_buffer_result_ok;
+    }
+    pub fn gfxBufferUnmap(self: *ColorFake, lease: *const a.GfxBufferHandle) i32 {
+        if (lease.id != 99) return self.base.gfxBufferUnmap(lease);
+        std.debug.assert(self.mapped); self.mapped = false; return a.gfx_buffer_result_ok;
+    }
+    pub fn gfxBufferRelease(self: *ColorFake, ref: *const a.GfxBufferHandle) i32 {
+        if (ref.id != 99) return self.base.gfxBufferRelease(ref);
+        std.debug.assert(self.creator and !self.mapped); self.creator = false; self.releases += 1; return a.gfx_buffer_result_ok;
+    }
+    pub fn testColor(self: *ColorFake, request: *const a.GfxModeColorRequest, out: *a.GfxAtomicResult) i32 {
+        std.debug.assert(self.creator and !self.mapped and request.image.id == 99 and request.image.generation == 3 and request.state.assignments[0].buffer.id != 99);
+        std.debug.assert(request.signal.transfer == 3 and request.signal.bpc == 10 and self.pixels[0] == 0xA579);
+        return self.base.testState(&request.state, out);
+    }
+    pub fn submitColor(self: *ColorFake, request: *const a.GfxModeColorRequest, ms: u32, out: *a.GfxModeStatus) i32 {
+        self.request = request.*; return self.base.submit(&request.state, ms, out);
+    }
+    pub fn status(self: *ColorFake, ticket: u64, out: *a.GfxModeStatus) i32 { return self.base.status(ticket, out); }
+    pub fn resolve(self: *ColorFake, ticket: u64, action: u32, out: *a.GfxModeStatus) i32 { return self.base.resolve(ticket, action, out); }
+};
+const Colors = struct {
+    fail: bool = false,
+    pub fn color_description_validate(_: Colors, description: *const gfx.R4GfxColorDescription) i32 {
+        std.debug.assert(description.alpha == gfx.color_alpha_opaque and description.precision == 10 and description.transfer == 3); return 0;
+    }
+    pub fn color_image_transform(self: Colors, source: *const gfx.R4GfxColorImage, target: *const gfx.R4GfxColorImage,
+        request: *const gfx.R4GfxColorTransform, _: *gfx.R4GfxCpuStats) i32
+    {
+        std.debug.assert(source.image.cpu_address != target.image.cpu_address and source.description.transfer == 1 and source.description.precision == 8 and
+            target.description.transfer == 3 and target.description.reference_white == 2_030_000 and request.opacity == 65535 and request.flags == 7);
+        if (self.fail) return -7;
+        const pixels: [*]u32 = @ptrFromInt(target.image.cpu_address);
+        @memset(pixels[0..@intCast(target.image.byte_length / 4)], 0xA579); return 0;
+    }
+};
+fn exerciseColor() !void {
+    var fake: ColorFake = .{};
+    var ui: control.Controller = .{};
+    try t.expect(ui.refresh(&fake));
+    const signal: a.GfxColorSignal = .{ .format = a.gfx_buffer_format_xrgb2101010, .bpc = 10, .primaries = 3, .transfer = 3, .range = 2,
+        .pipeline = 7, .reference_white = 2_030_000, .peak = 10_000_000, .metadata_valid = 1 };
+    try t.expect(ui.applyColor(gfx, &fake, Colors{}, signal));
+    try t.expect(fake.releases == 1 and fake.base.releases == 1 and !fake.creator and !fake.base.creator and !fake.mapped and !fake.base.mapped);
+    try t.expectEqualDeep(signal, fake.request.signal);
+    ui.close(&fake);
+    try t.expect(fake.base.decision == a.gfx_mode_resolve_rollback);
+    fake.base.current.phase = a.gfx_mode_phase_reverted; _ = ui.poll(&fake);
+    try t.expect(!ui.applyColor(gfx, &fake, Colors{ .fail = true }, signal));
+    try t.expect(fake.base.submissions == 1 and fake.releases == 2 and fake.base.releases == 2 and !fake.creator and !fake.base.creator and !fake.mapped and !fake.base.mapped);
 }

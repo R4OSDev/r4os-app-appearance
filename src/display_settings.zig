@@ -6,15 +6,15 @@ const control = catalog.control;
 const topology = catalog.topology;
 const a = r4os.abi;
 const Rect = r4os.gui.Rect;
-const Button = enum { monitor, mode_previous, mode_next, scale_down, scale_up, rotate, primary, left, right, above, below, clone, enabled, refresh, apply, keep, revert, close };
+const Button = enum { monitor, mode_previous, mode_next, scale_down, scale_up, rotate, primary, left, right, above, below, clone, enabled, colors, refresh, apply, keep, revert, close };
 const all_buttons = std.enums.values(Button);
 const scales = [_]u32{ 60, 90, 120, 150, 180, 210, 240, 300, 360, 480 };
 const face = r4os.gui.default_palette.face;
-pub fn run(sys: r4os.r4sys.Context, desk: r4os.r4desk.Context, draw: r4os.r4draw.Context, instance: u64) ?i32 {
+pub fn run(sys: r4os.r4sys.Context, desk: r4os.r4desk.Context, draw: r4os.r4draw.Context, instance: u64, raw: *const a.R4XStartContext) ?i32 {
     var client = control.Client.init(&sys, instance) orelse return null;
     if (!client.poll(&sys) or client.state.flags & 1 == 0) return null;
     const layout = control.decode(&client.state.layout) catch return null;
-    var app: App = .{ .sys = sys, .desk = desk, .draw = draw, .client = client, .edit = layout };
+    var app: App = .{ .sys = sys, .desk = desk, .draw = draw, .client = client, .edit = layout, .raw = raw };
     return app.run();
 }
 const App = struct {
@@ -23,6 +23,7 @@ const App = struct {
     draw: r4os.r4draw.Context,
     client: control.Client,
     edit: topology.Layout,
+    raw: ?*const a.R4XStartContext = null,
     snapshot: catalog.Snapshot = .{},
     modes: [a.gfx_output_max_modes]a.GfxOutputMode = @splat(.{}),
     mode_count: usize = 0,
@@ -116,6 +117,7 @@ const App = struct {
             .left, .right, .above, .below, .clone => idle and self.edit.count > 1 and self.edit.outputs[self.selected].enabled,
             .enabled => idle and !self.edit.outputs[self.selected].primary,
             .apply => idle and self.dirty,
+            .colors => idle and self.raw != null and self.edit.outputs[self.selected].key.persistable(),
             else => idle,
         };
     }
@@ -134,6 +136,7 @@ const App = struct {
             .below => .{ .x = 228, .y = 250, .w = 64, .h = 26 },
             .clone => .{ .x = self.width - 148, .y = 250, .w = 136, .h = 26 },
             .enabled => .{ .x = 12, .y = 288, .w = 170, .h = 26 },
+            .colors => .{ .x = self.width - 148, .y = 288, .w = 136, .h = 26 },
             .refresh, .keep => .{ .x = 12, .y = self.height - 40, .w = 90, .h = 28 },
             .apply, .revert => .{ .x = 112, .y = self.height - 40, .w = 106, .h = 28 },
             .close => .{ .x = self.width - 90, .y = self.height - 40, .w = 78, .h = 28 },
@@ -185,6 +188,11 @@ const App = struct {
             },
             .left, .right, .above, .below, .clone => if (!self.arrange(button)) return,
             .enabled => value.enabled = !value.enabled,
+            .colors => {
+                if (@import("display_color.zig").run(self.sys, self.desk, self.draw, self.raw.?, value.key, &self.client)) { self.exiting = true; return; }
+                _ = self.desk.guiSetTitle("Display settings"); self.metrics(); self.refreshCatalog();
+                return;
+            },
             .refresh => {
                 if (self.client.poll(&self.sys)) {
                     self.edit = control.decode(&self.client.state.layout) catch self.edit;
@@ -349,7 +357,7 @@ const App = struct {
                 .primary => if (selected.primary) "Primary display" else "Make primary",
                 .left => "Left", .right => "Right", .above => "Above", .below => "Below", .clone => "Clone",
                 .enabled => if (selected.enabled) "Display enabled" else "Enable display", .refresh => "Refresh", .apply => "Test changes",
-                .keep => "Keep", .revert => "Revert", .close => "Close",
+                .keep => "Keep", .revert => "Revert", .close => "Close", .colors => "Color settings...",
             };
             _ = canvas.button(.{ .rect = self.rect(button), .text = label, .focused = self.focus == button,
                 .state = if (!self.enabled(button)) .disabled else if (self.pressed == button) .pressed else .normal,
