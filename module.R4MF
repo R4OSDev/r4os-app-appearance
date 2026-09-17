@@ -1,7 +1,7 @@
 R4OS_MODULE_MANIFEST=2
 KIND=R4X
 NAME=APPEARANCE
-VERSION=0.1.11
+VERSION=0.1.12
 LANGUAGE=Zig
 SOURCE=src/main.zig
 ENTRY_MODE=app
@@ -18,5 +18,5 @@ ZIG_MODULE=r4std:../../Libraries/R4STD/Bindings/Zig/r4std.zig
 IMPORT=R4IMG:API_V1:1
 ZIG_MODULE=r4img:../../Libraries/R4IMG/Bindings/Zig/r4img.zig
 ZIG_MODULE=r4gfx_desktop_outputs:../../Libraries/R4GFX/Display/desktop_outputs.zig
-IMPORT=R4GFX:COLOR_V1:1
+IMPORT=R4GFX:COLOR_V1:2
 ZIG_MODULE=r4gfx:../../Libraries/R4GFX/Bindings/Zig/r4gfx_abi.zig
