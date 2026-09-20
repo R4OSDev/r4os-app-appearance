@@ -63,3 +63,13 @@ Keyboard
 Tab and Shift+Tab move between controls. Arrow keys switch tabs or select a
 color square. Enter activates the focused control. Escape closes the
 application.
+
+Display and graphics
+--------------------
+APPEARANCE /DISPLAY opens monitor arrangement, mode, scale, color and VRR.
+Graphics driver shows the active output, loaded versions and fallback reason.
+Its Automatic/Software choice applies after a restart. Automatic enables the
+driver's verified selection and replaces an existing NVIDIA mode override.
+Native NVIDIA graphics remain experimental pending physical acceptance.
+For one software boot, select R4OS Software Graphics in the boot menu.
+Firmware bundle version is a package label, not a GPU execution confirmation.

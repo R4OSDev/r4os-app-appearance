@@ -2,7 +2,7 @@ const std = @import("std");
 const r4os = @import("r4os");
 const control = @import("display_control.zig");
 const a = r4os.abi;
-const Button = enum { previous, next, refresh, apply, keep, revert, close };
+const Button = enum { previous, next, refresh, apply, keep, revert, graphics, close };
 const face = r4os.gui.default_palette.face;
 
 pub fn run(sys: r4os.r4sys.Context, desk: r4os.r4desk.Context, draw: r4os.r4draw.Context, instance: u64, raw: *const a.R4XStartContext) i32 {
@@ -25,7 +25,7 @@ const App = struct {
     fn run(self: *App) i32 {
         if (self.desk.programWindowId() < 0) { self.sys.println("Display settings requires the Desktop."); return 0; }
         _ = self.desk.guiSetTitle("Display settings");
-        _ = self.desk.guiSetMinSize(360, 280);
+        _ = self.desk.guiSetMinSize(480, 320);
         defer self.controller.close(&self.draw);
         _ = self.controller.refresh(&self.draw);
         self.metrics(); self.render();
@@ -69,8 +69,8 @@ const App = struct {
     fn metrics(self: *App) void {
         var info: a.GuiWindowInfo = .{};
         if (self.desk.guiWindowInfo(&info) >= 0) {
-            self.width = @max(360, info.client_w);
-            self.height = @max(280, info.client_h);
+            self.width = @max(480, info.client_w);
+            self.height = @max(320, info.client_h);
         }
     }
     fn seconds(self: *const App) u64 {
@@ -86,6 +86,7 @@ const App = struct {
             .keep => self.controller.status.phase == a.gfx_mode_phase_awaiting_confirmation,
             .revert => self.controller.busy() and self.controller.status.phase != a.gfx_mode_phase_confirming,
             .close => true,
+            .graphics => available,
         };
     }
     fn rect(self: *const App, target: Button) r4os.gui.Rect {
@@ -95,10 +96,11 @@ const App = struct {
             .refresh, .keep => .{ .x = 12, .y = self.height - 40, .w = 90, .h = 28 },
             .apply, .revert => .{ .x = 112, .y = self.height - 40, .w = 106, .h = 28 },
             .close => .{ .x = self.width - 90, .y = self.height - 40, .w = 78, .h = 28 },
+            .graphics => .{ .x = 230, .y = self.height - 40, .w = 130, .h = 28 },
         };
     }
-    fn buttons(self: *const App) [5]Button {
-        return if (self.controller.busy()) .{ .previous, .next, .keep, .revert, .close } else .{ .previous, .next, .refresh, .apply, .close };
+    fn buttons(self: *const App) [6]Button {
+        return if (self.controller.busy()) .{ .previous, .next, .keep, .revert, .graphics, .close } else .{ .previous, .next, .refresh, .apply, .graphics, .close };
     }
     fn hit(self: *const App, x: i32, y: i32) ?Button {
         for (self.buttons()) |target| if (self.enabled(target) and self.rect(target).contains(x, y)) return target;
@@ -135,6 +137,10 @@ const App = struct {
             .keep => _ = self.controller.resolve(&self.draw, true),
             .revert => _ = self.controller.resolve(&self.draw, false),
             .close => self.exiting = true,
+            .graphics => {
+                if (@import("graphics_page.zig").run(self.sys, self.desk, self.draw)) { self.exiting = true; return; }
+                _ = self.desk.guiSetTitle("Display settings"); self.metrics(); _ = self.controller.refresh(&self.draw);
+            },
         }
     }
     fn render(self: *App) void {
@@ -182,6 +188,7 @@ const App = struct {
             const text: [:0]const u8 = switch (target) {
                 .previous => "<", .next => ">", .refresh => "Refresh", .apply => "Test mode",
                 .keep => "Keep", .revert => "Revert", .close => "Close",
+                .graphics => "Graphics driver...",
             };
             _ = canvas.button(.{ .rect = self.rect(target), .text = text,
                 .state = if (!self.enabled(target)) .disabled else if (self.pressed == target) .pressed else .normal,

@@ -6,7 +6,7 @@ const control = catalog.control;
 const topology = catalog.topology;
 const a = r4os.abi;
 const Rect = r4os.gui.Rect;
-const Button = enum { monitor, mode_previous, mode_next, scale_down, scale_up, rotate, primary, left, right, above, below, clone, enabled, colors, vrr, refresh, apply, keep, revert, close };
+const Button = enum { monitor, mode_previous, mode_next, scale_down, scale_up, rotate, primary, left, right, above, below, clone, enabled, colors, vrr, graphics, refresh, apply, keep, revert, close };
 const all_buttons = std.enums.values(Button);
 const scales = [_]u32{ 60, 90, 120, 150, 180, 210, 240, 300, 360, 480 };
 const face = r4os.gui.default_palette.face;
@@ -139,6 +139,7 @@ const App = struct {
             .enabled => .{ .x = 12, .y = 288, .w = 170, .h = 26 },
             .colors => .{ .x = self.width - 148, .y = 288, .w = 136, .h = 26 },
             .vrr => .{ .x = 190, .y = 288, .w = 134, .h = 26 },
+            .graphics => .{ .x = 230, .y = self.height - 40, .w = 130, .h = 28 },
             .refresh, .keep => .{ .x = 12, .y = self.height - 40, .w = 90, .h = 28 },
             .apply, .revert => .{ .x = 112, .y = self.height - 40, .w = 106, .h = 28 },
             .close => .{ .x = self.width - 90, .y = self.height - 40, .w = 78, .h = 28 },
@@ -206,6 +207,11 @@ const App = struct {
                     self.selected = @min(self.selected, self.edit.count - 1); self.dirty = false; self.refreshCatalog();
                     self.status = "Current display settings loaded.";
                 }
+                return;
+            },
+            .graphics => {
+                if (@import("graphics_page.zig").run(self.sys, self.desk, self.draw)) { self.exiting = true; return; }
+                _ = self.desk.guiSetTitle("Display settings"); self.metrics(); self.refreshCatalog();
                 return;
             },
             .apply => {
@@ -365,6 +371,7 @@ const App = struct {
                 .left => "Left", .right => "Right", .above => "Above", .below => "Below", .clone => "Clone",
                 .enabled => if (selected.enabled) "Display enabled" else "Enable display", .refresh => "Refresh", .apply => "Test changes",
                 .keep => "Keep", .revert => "Revert", .close => "Close", .colors => "Color settings...", .vrr => "VRR settings...",
+                .graphics => "Graphics driver...",
             };
             _ = canvas.button(.{ .rect = self.rect(button), .text = label, .focused = self.focus == button,
                 .state = if (!self.enabled(button)) .disabled else if (self.pressed == button) .pressed else .normal,

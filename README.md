@@ -4,7 +4,7 @@
 
 ## Package
 
-- Version: `0.1.8`
+- Version: `0.1.13`
 - Image target: `/R4OS/SOFTWARE/DESKTOP/APPEARANCE.R4X`
 - Image scope: `full`
 - Canonical project manifest: `module.R4MF`
@@ -62,3 +62,17 @@ der wiederhergestellte Inhalt gelesen. Lese-/Groessenfehler verhindern das
 Speichern. Die vier Appearance-Werte werden gemeinsam komponiert; andere
 Schluessel wie TASKBAR_CLOCK und UI_FONT bleiben erhalten. Publikation
 verwendet weiterhin R4STD CONFIG_V1 saveDocument.
+
+Graphics startup (0.79.42)
+-------------------------
+APPEARANCE /DISPLAY -> Graphics driver shows the confirmed output owner,
+loaded R4D version, declared firmware bundle, current boot policy and fallback
+reason. Unknown versions stay unknown; a bundle label never proves GPU
+firmware execution. Color and VRR remain separate per-output settings.
+
+Save startup edits C:\CONFIG.R4S for the next boot using checked atomic
+replacement. Unrelated lines/comments remain intact; Automatic also replaces
+an existing NVIDIA mode override with auto. Software overrides native options
+before GPU access. Oversized/unreadable config and concurrent changes fail
+closed; an ambiguous write retains its temporary copies. The boot-menu
+Software Graphics entry applies once and leaves this file unchanged.
