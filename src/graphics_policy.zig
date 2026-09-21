@@ -30,15 +30,18 @@ fn value(line: []const u8) ?[]const u8 {
     if (content.len < 9 or !std.ascii.eqlIgnoreCase(content[0..9], "GRAPHICS=")) return null;
     return content[9..];
 }
-fn nvidiaMode(line: []const u8) bool {
+fn graphicsDriverMode(line: []const u8) ?[]const u8 {
     const content = std.mem.trim(u8, line[0 .. std.mem.indexOfScalar(u8, line, '#') orelse line.len], " \t");
-    if (content.len < 7 or !std.ascii.eqlIgnoreCase(content[0..7], "OPTION ")) return false;
+    if (content.len < 7 or !std.ascii.eqlIgnoreCase(content[0..7], "OPTION ")) return null;
     const rest = std.mem.trim(u8, content[7..], " \t");
-    const separator = std.mem.indexOfScalar(u8, rest, ' ') orelse return false;
-    if (!std.ascii.eqlIgnoreCase(std.mem.trim(u8, rest[0..separator], " \t"), "NVIDIA")) return false;
+    const separator = std.mem.indexOfAny(u8, rest, " \t") orelse return null;
+    const driver = rest[0..separator];
+    // These two driver owners implement the shared auto/passive/native mode
+    // policy. Other drivers' unrelated mode options must remain unchanged.
+    if (!std.ascii.eqlIgnoreCase(driver, "NVIDIA") and !std.ascii.eqlIgnoreCase(driver, "AMDGPU")) return null;
     const option = rest[separator + 1 ..];
-    const equals = std.mem.indexOfScalar(u8, option, '=') orelse return false;
-    return std.ascii.eqlIgnoreCase(std.mem.trim(u8, option[0..equals], " \t"), "mode");
+    const equals = std.mem.indexOfScalar(u8, option, '=') orelse return null;
+    return if (std.ascii.eqlIgnoreCase(std.mem.trim(u8, option[0..equals], " \t"), "mode")) driver else null;
 }
 pub fn rewrite(bytes: []const u8, choice: Choice, out: *[max_bytes]u8) ![]const u8 {
     if (bytes.len == 0 or bytes.len > max_bytes or std.mem.indexOfScalar(u8, bytes, 0) != null) return error.Size;
@@ -52,9 +55,16 @@ pub fn rewrite(bytes: []const u8, choice: Choice, out: *[max_bytes]u8) ![]const 
         while (end < body.len and body[end] != '\r' and body[end] != '\n') : (end += 1) {}
         const line = body[start..end];
         const graphics_line = value(line) != null;
-        if (graphics_line or (choice == .automatic and nvidiaMode(line))) {
+        const driver_mode = if (choice == .automatic) graphicsDriverMode(line) else null;
+        if (graphics_line or driver_mode != null) {
             found = found or graphics_line;
-            try append(out, &written, if (!graphics_line) "OPTION NVIDIA mode=auto" else if (choice == .automatic) "GRAPHICS=AUTO" else "GRAPHICS=SOFTWARE");
+            if (graphics_line) {
+                try append(out, &written, if (choice == .automatic) "GRAPHICS=AUTO" else "GRAPHICS=SOFTWARE");
+            } else {
+                try append(out, &written, "OPTION ");
+                try append(out, &written, driver_mode.?);
+                try append(out, &written, " mode=auto");
+            }
             if (std.mem.indexOfScalar(u8, line, '#')) |comment| {
                 try append(out, &written, " "); try append(out, &written, line[comment..]);
             }
@@ -121,6 +131,10 @@ pub fn exercise() !void {
     try t.expectEqual(Choice.software, selected(result));
     try t.expectEqualStrings("OPTION NVIDIA mode=auto # old passive\nOPTION SID model=8580\nGRAPHICS=AUTO\r\n",
         try rewrite("OPTION NVIDIA mode=passive # old passive\nOPTION SID model=8580\n", .automatic, &out));
+    try t.expectEqualStrings("OPTION amdgpu mode=auto # panel\nOPTION NVIDIA mode=auto\nOPTION SID mode=6581\nOPTION AMDGPU power=balanced\nGRAPHICS=AUTO\r\n",
+        try rewrite("OPTION amdgpu\tmode = passive # panel\nOPTION NVIDIA mode=native\nOPTION SID mode=6581\nOPTION AMDGPU power=balanced\n", .automatic, &out));
+    try t.expectEqualStrings("OPTION AMDGPU mode=native\nGRAPHICS=SOFTWARE\r\n",
+        try rewrite("OPTION AMDGPU mode=native\n", .software, &out));
     try t.expectEqual(Choice.automatic, selected(try rewrite("#GRAPHICS=SOFTWARE\nAUTO=PCI", .automatic, &out)));
     const full: [max_bytes]u8 = @splat('x');
     try t.expectError(error.Size, rewrite(&full, .software, &out));
