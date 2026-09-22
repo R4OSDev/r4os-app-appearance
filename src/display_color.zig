@@ -164,7 +164,7 @@ const App = struct {
         const entry = for (snapshot.entries[0..snapshot.count]) |value| { if (std.meta.eql(value.key, self.key)) break value; }
             else { self.status = "This monitor is no longer connected."; return; };
         const saved = self.read() catch { self.status = "Could not read the color settings."; return; };
-        if (!std.meta.eql(self.signal, settings.sdr)) if (saved.find(self.key)) |choice| if (choice.enabled()) {
+        if (!catalog.color.profileEncoding(self.signal)) if (saved.find(self.key)) |choice| if (choice.enabled()) {
             self.status = "Reset and save the ICC profile before testing this output encoding."; return;
         };
         if (!self.client.poll(&self.sys) or !self.client.requestColor(&self.sys, .{ .output = entry.info.identity, .signal = self.signal })) {
@@ -200,8 +200,7 @@ const App = struct {
             else { self.status = "This monitor is no longer connected."; return; };
         if (choice.enabled()) {
             const state = entry.color orelse { self.status = "Color profiles are unavailable for this display driver."; return; };
-            if (state.flags & 7 != 7 or state.format != a.gfx_buffer_format_xrgb8888 or state.bpc != 8 or
-                state.primaries != 1 or state.transfer != 1 or state.range != 1) {
+            if (state.flags & 7 != 7 or !catalog.color.profileEncoding(state)) {
                 self.status = "This output encoding does not support display profiles yet."; return;
             }
             var profile = catalog.profiles.Owner(gfx).openFile(self.sys.allocator(), self.colors, &self.sys, choice.profilePath(), choice.intent, choice.flags)
