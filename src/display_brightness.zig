@@ -42,6 +42,7 @@ const App = struct {
     key: catalog.topology.Key,
     level: u32 = 65535,
     initialized: bool = false,
+    keys_available: bool = false,
     state: ?a.GfxOutputBrightness = null,
     width: i32 = 640,
     height: i32 = 420,
@@ -59,9 +60,13 @@ const App = struct {
         return settings.Config.parse(bytes[0..@intCast(count)]);
     }
     fn poll(self: *App) bool {
+        const previous_keys = self.keys_available;
+        var input: a.PlatformInputSnapshot = .{};
+        self.keys_available = self.sys.platformInputSnapshot(&input) > 0 and input.version == 1 and
+            input.size == @sizeOf(a.PlatformInputSnapshot) and input.capabilities & 1 != 0 and input.sources != 0;
         const previous = self.state;
         self.state = null;
-        const snapshot = catalog.Snapshot.read(&self.draw) catch return previous != null;
+        const snapshot = catalog.Snapshot.read(&self.draw) catch return previous != null or previous_keys != self.keys_available;
         for (snapshot.entries[0..snapshot.count]) |entry| {
             if (!std.meta.eql(entry.key, self.key) or !entry.active()) continue;
             var value: a.GfxOutputBrightness = .{};
@@ -75,7 +80,7 @@ const App = struct {
             }
             break;
         }
-        return !std.meta.eql(previous, self.state);
+        return !std.meta.eql(previous, self.state) or previous_keys != self.keys_available;
     }
     fn usable(self: *const App) bool {
         const state = self.state orelse return false;
@@ -151,7 +156,8 @@ const App = struct {
             _ = canvas.textClipped(12, 80, self.width - 24, &scratch, observed, 0, face);
             _ = canvas.textClipped(12, 112, self.width - 24, &scratch, names.reason(state.reason), 0, face);
         } else _ = canvas.textClipped(12, 80, self.width - 24, &scratch, "Brightness control is unavailable for this display.", 0, face);
-        _ = canvas.textClipped(12, 268, self.width - 24, &scratch, "Brightness keys are not available in this system.", 0x404040, face);
+        _ = canvas.textClipped(12, 268, self.width - 24, &scratch, if (self.keys_available)
+            "Brightness keys control the internal display." else "No supported brightness key source is connected.", 0x404040, face);
         _ = canvas.textClipped(12, self.height - 82, self.width - 24, &scratch, self.message, 0, face);
         for (std.enums.values(Button)) |button| {
             const label = switch (button) { .decrease => "Darker", .increase => "Brighter", .reset => "Use current level", .save => "Save brightness", .close => "Back" };
