@@ -41,7 +41,12 @@ fn graphicsDriverMode(line: []const u8) ?[]const u8 {
     if (!std.ascii.eqlIgnoreCase(driver, "NVIDIA") and !std.ascii.eqlIgnoreCase(driver, "AMDGPU")) return null;
     const option = rest[separator + 1 ..];
     const equals = std.mem.indexOfScalar(u8, option, '=') orelse return null;
-    return if (std.ascii.eqlIgnoreCase(std.mem.trim(u8, option[0..equals], " \t"), "mode")) driver else null;
+    if (!std.ascii.eqlIgnoreCase(std.mem.trim(u8, option[0..equals], " \t"), "mode")) return null;
+    // AMD auto deliberately stays passive until board qualification. Keep a
+    // user's explicit native admission across Software -> Automatic changes.
+    if (std.ascii.eqlIgnoreCase(driver, "AMDGPU") and
+        std.ascii.eqlIgnoreCase(std.mem.trim(u8, option[equals + 1 ..], " \t"), "native")) return null;
+    return driver;
 }
 pub fn rewrite(bytes: []const u8, choice: Choice, out: *[max_bytes]u8) ![]const u8 {
     if (bytes.len == 0 or bytes.len > max_bytes or std.mem.indexOfScalar(u8, bytes, 0) != null) return error.Size;
@@ -135,6 +140,10 @@ pub fn exercise() !void {
         try rewrite("OPTION amdgpu\tmode = passive # panel\nOPTION NVIDIA mode=native\nOPTION SID mode=6581\nOPTION AMDGPU power=balanced\n", .automatic, &out));
     try t.expectEqualStrings("OPTION AMDGPU mode=native\nGRAPHICS=SOFTWARE\r\n",
         try rewrite("OPTION AMDGPU mode=native\n", .software, &out));
+    var intermediate: [max_bytes]u8 = undefined;
+    const native = "GRAPHICS=AUTO\r\n  OPTION amdgpu\tmode = NaTiVe # qualified panel\r\n";
+    const software = try rewrite(native, .software, &intermediate);
+    try t.expectEqualStrings(native, try rewrite(software, .automatic, &out));
     try t.expectEqual(Choice.automatic, selected(try rewrite("#GRAPHICS=SOFTWARE\nAUTO=PCI", .automatic, &out)));
     const full: [max_bytes]u8 = @splat('x');
     try t.expectError(error.Size, rewrite(&full, .software, &out));
