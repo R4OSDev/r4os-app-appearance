@@ -4,6 +4,7 @@ test "display selection retains common ownership and waits for real decisions" {
     try @import("display_control_test.zig").exercise();
     try @import("display_settings.zig").exercise();
     try @import("graphics_policy.zig").exercise();
+    try @import("display_refresh.zig").exercise();
     const r4os = @import("r4os");
     const a = r4os.abi;
     const original: a.DisplayStateInfo = .{ .revision = 5, .device_generation = 7, .driver_owner = 2, .adapter_id = 0x01000100 };

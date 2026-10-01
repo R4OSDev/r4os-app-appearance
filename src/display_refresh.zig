@@ -99,18 +99,20 @@ const App = struct {
             .policy => self.policy = (self.policy + 1) % 3,
             .flicker => { self.policy = 0; self.save(true); },
             .retry => { if (self.policy == 0) self.policy = 1; self.save(false); },
-            .save => self.save(false),
+            .save => self.save(null),
             .close => self.exiting = true,
         }
     }
-    fn save(self: *App, blocked: bool) void {
+    fn save(self: *App, blocked: ?bool) void {
         const saved = self.read() catch { self.message = "Could not read the current refresh settings."; return; };
-        const next = saved.change(self.key, self.policy, blocked) catch { self.message = "Could not update this monitor's refresh settings."; return; };
+        const next = changePreferences(&saved, self.key, self.policy, blocked) catch { self.message = "Could not update this monitor's refresh settings."; return; };
         var bytes: [settings.max_bytes]u8 = undefined;
         const encoded = next.encode(&bytes) catch { self.message = "Could not encode the refresh settings."; return; };
         if (r4std.config.saveDocument(&self.sys, settings.path, encoded) < 0) { self.message = "Could not save the refresh settings."; return; }
+        const choice = next.find(self.key).?;
+        self.policy = choice.policy;
         if (self.desk.guiSetText("R4OS_APPEARANCE_RELOAD=1") < 0) { self.message = "Saved. Restart the Desktop to apply the policy."; return; }
-        self.message = if (blocked) "Flicker reported. VRR stays off until you retry." else "Saved. The Desktop applies the policy when eligible.";
+        self.message = if (choice.blocked) "VRR stays off. Use Retry VRR to clear the flicker lock." else "Saved. The Desktop applies the policy when eligible.";
     }
     fn render(self: *App) void {
         var paint = switch (r4os.app_gui.beginPaintForSize(&self.draw, self.width, self.height)) { .paint => |value| value, .failure => return };
@@ -146,3 +148,39 @@ const App = struct {
         _ = paint.present();
     }
 };
+
+// A normal save preserves the latest on-disk lock, including when this
+// window was opened before another settings window reported flicker.
+// Only the explicit Retry button passes false; Flicker passes true.
+fn changePreferences(saved: *const settings.Config, key: catalog.topology.Key, policy: u32, action: ?bool) !settings.Config {
+    const blocked = action orelse if (saved.find(key)) |choice| choice.blocked else false;
+    return saved.change(key, if (blocked) 0 else policy, blocked);
+}
+
+pub fn exercise() !void {
+    const t = std.testing;
+    const key: catalog.topology.Key = .{ .adapter = 17, .connector = 3, .receiver = @splat(1) };
+    var other = key; other.connector = 4;
+    var config: settings.Config = .{};
+    config = try changePreferences(&config, other, 2, null);
+    const untouched = config.find(other).?;
+    config = try changePreferences(&config, key, 1, null);
+    config = try changePreferences(&config, key, 1, true);
+    var bytes: [settings.max_bytes]u8 = undefined;
+    config = try settings.Config.parse(try config.encode(&bytes));
+    // Save after reopening, and a stale window's nonzero selection, must
+    // both preserve the durable fault. Shared client checks cover the
+    // resulting Flicker/fixed ACK and subsequent explicit ClearFault ACK.
+    for ([_]u32{ 0, 1, 2 }) |policy| {
+        const serial = config.find(key).?.serial;
+        config = try changePreferences(&config, key, policy, null);
+        const choice = config.find(key).?;
+        try t.expect(choice.blocked and choice.policy == 0 and choice.serial == serial + 1);
+        config = try settings.Config.parse(try config.encode(&bytes));
+    }
+    config = try changePreferences(&config, key, 1, false);
+    try t.expect(!config.find(key).?.blocked and config.find(key).?.policy == 1);
+    config = try changePreferences(&config, key, 2, null);
+    try t.expect(!config.find(key).?.blocked and config.find(key).?.policy == 2);
+    try t.expectEqualDeep(untouched, config.find(other).?);
+}
