@@ -2,6 +2,9 @@
 
 `APPEARANCE.R4X` is an independent R4OS application implemented in Zig.
 
+Configuration text validation imports R4STD `TEXT_V1` explicitly. The existing
+`/SELFTEST` reports the exact save error and cleans the atomic `.TMP`/`.BAK` siblings.
+
 ## Package
 
 - Version: `0.1.14`

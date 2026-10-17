@@ -763,11 +763,17 @@ fn runSelfTest(ctx: *const r4os.r4sys.Context) i32 {
     const path = "D:\\APPEAR.R4S";
     defer {
         _ = ctx.fileDelete(path);
-        _ = ctx.fileDelete("D:\\APPEAR.R4S.TMP");
-        _ = ctx.fileDelete("D:\\APPEAR.R4S.BAK");
+        _ = ctx.fileDelete("D:\\APPEAR.TMP");
+        _ = ctx.fileDelete("D:\\APPEAR.BAK");
     }
     if (ctx.fileWrite(path, "WALLPAPER=NONE\r\nDESKTOP_BG=008080\r\nDESKTOP_ICON_TEXT=FFFFFF\r\n") < 0) return selfTestFail(ctx, "fixture-write");
-    if (saveAppearanceConfig(ctx, path, "336699", "FFD700", "D:\\WALL.BMP") < 0) return selfTestFail(ctx, "config-write");
+    const saved = saveAppearanceConfig(ctx, path, "336699", "FFD700", "D:\\WALL.BMP");
+    if (saved < 0) {
+        ctx.write("APPEARANCE config-write error=");
+        ctx.printI32(saved);
+        ctx.println("");
+        return selfTestFail(ctx, "config-write");
+    }
     var bytes: [256]u8 = undefined;
     const len = ctx.fileRead(path, bytes[0..]);
     if (len <= 0) return selfTestFail(ctx, "config-read");
