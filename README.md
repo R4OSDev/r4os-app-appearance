@@ -86,3 +86,7 @@ Software Graphics entry applies once and leaves this file unchanged.
 0.85.43 rebuilds the embedded DirectoryPage with exact full UTF8 row paths
 and whole-scalar, explicitly shortened presentation labels. No new appearance
 or glyph capability is implied.
+
+0.85.44: Rebuilt with SDK0.64.57 and the shared R4STD Unicode17.0.0
+extended grapheme editing boundaries. Byte offsets, scalar font advances
+and grapheme clusters are distinct; no shaping or BiDi support is implied.

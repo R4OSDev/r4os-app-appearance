@@ -114,7 +114,7 @@ const App = struct {
                         },
                         .mouse_down => self.handleMouseDown(event.x, event.y),
                         .mouse_up => self.handleMouseUp(event.x, event.y),
-                        .key_down => self.handleKey(@intCast(event.key & 0xFF)),
+                        .key_down => self.handleKey(event.key),
                         else => {},
                     }
                 },
@@ -291,7 +291,8 @@ const App = struct {
         if (!self.should_exit) self.render();
     }
 
-    fn handleKey(self: *App, key: u8) void {
+    fn handleKey(self: *App, codepoint: u32) void {
+        const key: u8 = if (codepoint <= 0xff) @intCast(codepoint) else 0;
         if (self.dialog_open) {
             self.handleFileDialogKey(key);
             self.render();
@@ -309,7 +310,7 @@ const App = struct {
         if (self.focus == .rgb) {
             if (key == r4os.gui.Key.enter) {
                 _ = self.acceptRgbText();
-            } else if (self.rgb.handleClipboardKey(&self.ctx.desk, key)) {
+            } else if (self.rgb.handleClipboardCodepoint(&self.ctx.desk, codepoint)) {
                 self.selected_swatch = null;
                 self.setStatus("Press Apply to save the color.");
             }
