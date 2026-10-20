@@ -7,7 +7,7 @@ Configuration text validation imports R4STD `TEXT_V1` explicitly. The existing
 
 ## Package
 
-- Version: `0.1.14`
+- Version: `0.1.24`
 - Image target: `/R4OS/SOFTWARE/DESKTOP/APPEARANCE.R4X`
 - Image scope: `full`
 - Canonical project manifest: `module.R4MF`
@@ -82,3 +82,7 @@ an existing NVIDIA mode override with auto. Software overrides native options
 before GPU access. Oversized/unreadable config and concurrent changes fail
 closed; an ambiguous write retains its temporary copies. The boot-menu
 Software Graphics entry applies once and leaves this file unchanged.
+
+0.85.43 rebuilds the embedded DirectoryPage with exact full UTF8 row paths
+and whole-scalar, explicitly shortened presentation labels. No new appearance
+or glyph capability is implied.
