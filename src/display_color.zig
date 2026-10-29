@@ -14,7 +14,8 @@ pub fn run(sys: r4os.r4sys.Context, desk: r4os.r4desk.Context, draw: r4os.r4draw
     const colors = gfx.ColorV1Client.init(raw) catch return false;
     var app: App = .{ .sys = sys, .desk = desk, .draw = draw, .colors = colors, .key = key, .client = client };
     defer client.close(&sys);
-    app.load(); app.metrics();
+    app.load();
+    app.metrics();
     _ = desk.guiSetTitle("Display color settings");
     _ = desk.guiSetMinSize(480, 560);
     app.metrics();
@@ -25,11 +26,25 @@ pub fn run(sys: r4os.r4sys.Context, desk: r4os.r4desk.Context, draw: r4os.r4draw
         const delay: u64 = if (app.waiting()) 100 else 500;
         switch (events.wait(r4os.time_contract.timeoutFinite(.{ .nanoseconds = delay * std.time.ns_per_ms }))) {
             .message => |message| if (message.guiEvent()) |event| switch (@as(a.GuiEventKind, @enumFromInt(event.kind))) {
-                .close => { app.exiting = true; app.close_window = true; },
+                .close => {
+                    app.exiting = true;
+                    app.close_window = true;
+                },
                 .resize => app.metrics(),
                 .key_down => app.keypress(event.key),
-                .mouse_down => { app.pressed = app.hit(event.x, event.y); if (app.pressed) |button| app.focus = button; },
-                .mouse_up => { const button = app.hit(event.x, event.y); if (button != null and button == app.pressed) app.activate(button.?); app.pressed = null; },
+                .input_reset, .focus_lost => {
+                    redraw = app.pressed != null;
+                    app.pressed = null;
+                },
+                .mouse_down => {
+                    app.pressed = app.hit(event.x, event.y);
+                    if (app.pressed) |button| app.focus = button;
+                },
+                .mouse_up => {
+                    const button = app.hit(event.x, event.y);
+                    if (button != null and button == app.pressed) app.activate(button.?);
+                    app.pressed = null;
+                },
                 else => {},
             },
             .failure => return true,
@@ -68,14 +83,22 @@ const App = struct {
         return settings.Config.parse(bytes[0..@intCast(count)]);
     }
     fn load(self: *App) void {
-        const saved = self.read() catch { self.status = "Could not read the color settings."; return; };
+        const saved = self.read() catch {
+            self.status = "Could not read the color settings.";
+            return;
+        };
         const choice = saved.find(self.key) orelse settings.Choice{ .key = self.key };
         self.filename.set(std.mem.span(choice.profilePath()));
-        self.intent = choice.intent; self.flags = choice.flags; self.signal = choice.signal;
+        self.intent = choice.intent;
+        self.flags = choice.flags;
+        self.signal = choice.signal;
     }
     fn metrics(self: *App) void {
         var info: a.GuiWindowInfo = .{};
-        if (self.desk.guiWindowInfo(&info) >= 0) { self.width = @max(480, info.client_w); self.height = @max(560, info.client_h); }
+        if (self.desk.guiWindowInfo(&info) >= 0) {
+            self.width = @max(480, info.client_w);
+            self.height = @max(560, info.client_h);
+        }
     }
     fn rect(self: *const App, button: Button) r4os.gui.Rect {
         return switch (button) {
@@ -101,15 +124,16 @@ const App = struct {
     }
     fn keypress(self: *App, key: u32) void {
         const keys = r4os.gui.Key;
-        if (key == keys.escape) { self.exiting = true; return; }
+        if (key == keys.escape) {
+            self.exiting = true;
+            return;
+        }
         if (key == keys.tab or key == keys.shift_tab) {
             const count = std.enums.values(Button).len;
             const index: usize = @intFromEnum(self.focus);
             self.focus = @enumFromInt(if (key == keys.tab) (index + 1) % count else (index + count - 1) % count);
         } else if (self.focus == .filename and !self.waiting()) {
-            if (key == keys.enter) self.activate(.save)
-            else if (key == keys.ctrl_c or key == keys.ctrl_v or key == keys.ctrl_x) _ = self.filename.handleClipboardKey(&self.desk, @intCast(key))
-            else _ = self.filename.handleCodepoint(key);
+            if (key == keys.enter) self.activate(.save) else if (key == keys.ctrl_c or key == keys.ctrl_v or key == keys.ctrl_x) _ = self.filename.handleClipboardKey(&self.desk, @intCast(key)) else _ = self.filename.handleCodepoint(key);
         } else if (key == keys.enter or key == ' ') self.activate(self.focus);
     }
     fn activate(self: *App, button: Button) void {
@@ -124,14 +148,25 @@ const App = struct {
             .white => self.signal.reference_white = nextLuminance(self.signal.reference_white, &.{ 100, 150, 203, 250, 300, 400 }),
             .peak => self.signal.peak = nextLuminance(self.signal.peak, &.{ 500, 1000, 2000, 4000, 10000 }),
             .test_output => self.testOutput(),
-            .keep => { _ = self.client.request(&self.sys, 2, null); },
-            .revert => { _ = self.client.request(&self.sys, 3, null); },
-            .standard => { self.filename.clear(); self.intent = 1; self.flags = 1; self.save(); },
+            .keep => {
+                _ = self.client.request(&self.sys, 2, null);
+            },
+            .revert => {
+                _ = self.client.request(&self.sys, 3, null);
+            },
+            .standard => {
+                self.filename.clear();
+                self.intent = 1;
+                self.flags = 1;
+                self.save();
+            },
             .save => self.save(),
             .close => self.exiting = true,
         }
     }
-    fn waiting(self: *const App) bool { return self.client.pending != null or catalog.control.active(self.client.state.phase); }
+    fn waiting(self: *const App) bool {
+        return self.client.pending != null or catalog.control.active(self.client.state.phase);
+    }
     fn enabled(self: *const App, button: Button) bool {
         return switch (button) {
             .close => true,
@@ -145,11 +180,16 @@ const App = struct {
         const previous = self.signal;
         self.signal = settings.sdr;
         if (previous.transfer == 1 and previous.bpc == 8) {
-            self.signal.bpc = 10; self.signal.format = a.gfx_buffer_format_xrgb2101010;
+            self.signal.bpc = 10;
+            self.signal.format = a.gfx_buffer_format_xrgb2101010;
         } else if (previous.transfer != 4) {
-            self.signal.bpc = 10; self.signal.format = a.gfx_buffer_format_xrgb2101010;
-            self.signal.primaries = 3; self.signal.transfer = if (previous.transfer == 3) 4 else 3;
-            self.signal.range = 2; self.signal.reference_white = 2_030_000; self.signal.peak = 10_000_000;
+            self.signal.bpc = 10;
+            self.signal.format = a.gfx_buffer_format_xrgb2101010;
+            self.signal.primaries = 3;
+            self.signal.transfer = if (previous.transfer == 3) 4 else 3;
+            self.signal.range = 2;
+            self.signal.reference_white = 2_030_000;
+            self.signal.peak = 10_000_000;
             // The compositor has no content mastering/CLL measurement. CTA
             // unknown values stay zero; monitor limits are not mastering data.
             self.signal.metadata_valid = 1;
@@ -160,15 +200,27 @@ const App = struct {
         return values[0] * 10000;
     }
     fn testOutput(self: *App) void {
-        const snapshot = catalog.Snapshot.read(&self.draw) catch { self.status = "Display information changed. Try again."; return; };
-        const entry = for (snapshot.entries[0..snapshot.count]) |value| { if (std.meta.eql(value.key, self.key)) break value; }
-            else { self.status = "This monitor is no longer connected."; return; };
-        const saved = self.read() catch { self.status = "Could not read the color settings."; return; };
+        const snapshot = catalog.Snapshot.read(&self.draw) catch {
+            self.status = "Display information changed. Try again.";
+            return;
+        };
+        const entry = for (snapshot.entries[0..snapshot.count]) |value| {
+            if (std.meta.eql(value.key, self.key)) break value;
+        } else {
+            self.status = "This monitor is no longer connected.";
+            return;
+        };
+        const saved = self.read() catch {
+            self.status = "Could not read the color settings.";
+            return;
+        };
         if (!catalog.color.profileEncoding(self.signal)) if (saved.find(self.key)) |choice| if (choice.enabled()) {
-            self.status = "Reset and save the ICC profile before testing this output encoding."; return;
+            self.status = "Reset and save the ICC profile before testing this output encoding.";
+            return;
         };
         if (!self.client.poll(&self.sys) or !self.client.requestColor(&self.sys, .{ .output = entry.info.identity, .signal = self.signal })) {
-            self.status = "The Desktop could not start the color change."; return;
+            self.status = "The Desktop could not start the color change.";
+            return;
         }
         self.status = "Testing output color settings...";
     }
@@ -178,48 +230,97 @@ const App = struct {
         _ = if (self.client.pending != null) self.client.retry(&self.sys) else self.client.poll(&self.sys);
         const state = self.client.state;
         if (state.phase != before.phase or state.result != before.result) {
-            if (state.phase == 2) { self.focus = .revert; self.pressed = null; }
-            if (state.phase == 4 and state.result == 0) { self.load(); self.status = "Output color settings kept."; }
+            if (state.phase == 2) {
+                self.focus = .revert;
+                self.pressed = null;
+            }
+            if (state.phase == 4 and state.result == 0) {
+                self.load();
+                self.status = "Output color settings kept.";
+            }
             if (state.phase == 4 and state.result != 0) self.status = "Color settings applied, but saving failed.";
-            if (state.phase == 5) { self.load(); self.status = "Previous output color settings restored."; }
+            if (state.phase == 5) {
+                self.load();
+                self.status = "Previous output color settings restored.";
+            }
             if (state.phase == 6) self.status = "Color change failed or is unsupported. Check the display and profile settings.";
         }
         const second = (self.sys.monotonicNanoseconds() orelse 0) / std.time.ns_per_s;
         const changed = !std.meta.eql(before, state) or previous_error != self.client.last_error or (state.phase == 2 and second != self.displayed_second);
-        self.displayed_second = second; return changed;
+        self.displayed_second = second;
+        return changed;
     }
     fn save(self: *App) void {
         var choice: settings.Choice = .{ .key = self.key, .intent = self.intent, .flags = self.flags };
-        choice.setPath(self.filename.value()) catch { self.status = "Enter an absolute file path, or leave it empty."; return; };
+        choice.setPath(self.filename.value()) catch {
+            self.status = "Enter an absolute file path, or leave it empty.";
+            return;
+        };
         // Re-read before saving to preserve choices for other/absent monitors.
-        const saved = self.read() catch { self.status = "Could not read the current color settings."; return; };
+        const saved = self.read() catch {
+            self.status = "Could not read the current color settings.";
+            return;
+        };
         if (saved.find(self.key)) |previous| choice.signal = previous.signal;
-        const next = saved.remember(choice) catch { self.status = "The monitor cannot be saved in the color settings."; return; };
-        const snapshot = catalog.Snapshot.read(&self.draw) catch { self.status = "Display information changed. Try again."; return; };
-        const entry = for (snapshot.entries[0..snapshot.count]) |value| { if (std.meta.eql(value.key, self.key)) break value; }
-            else { self.status = "This monitor is no longer connected."; return; };
+        const next = saved.remember(choice) catch {
+            self.status = "The monitor cannot be saved in the color settings.";
+            return;
+        };
+        const snapshot = catalog.Snapshot.read(&self.draw) catch {
+            self.status = "Display information changed. Try again.";
+            return;
+        };
+        const entry = for (snapshot.entries[0..snapshot.count]) |value| {
+            if (std.meta.eql(value.key, self.key)) break value;
+        } else {
+            self.status = "This monitor is no longer connected.";
+            return;
+        };
         if (choice.enabled()) {
-            const state = entry.color orelse { self.status = "Color profiles are unavailable for this display driver."; return; };
+            const state = entry.color orelse {
+                self.status = "Color profiles are unavailable for this display driver.";
+                return;
+            };
             if (state.flags & 7 != 7 or !catalog.color.profileEncoding(state)) {
-                self.status = "This output encoding does not support display profiles yet."; return;
+                self.status = "This output encoding does not support display profiles yet.";
+                return;
             }
-            var profile = catalog.profiles.Owner(gfx).openFile(self.sys.allocator(), self.colors, &self.sys, choice.profilePath(), choice.intent, choice.flags)
-                catch { self.status = "Could not open a compatible ICC display profile."; return; };
-            if (!profile.close()) { self.status = "The color profile could not be released."; return; }
+            var profile = catalog.profiles.Owner(gfx).openFile(self.sys.allocator(), self.colors, &self.sys, choice.profilePath(), choice.intent, choice.flags) catch {
+                self.status = "Could not open a compatible ICC display profile.";
+                return;
+            };
+            if (!profile.close()) {
+                self.status = "The color profile could not be released.";
+                return;
+            }
         }
         var bytes: [settings.max_bytes]u8 = undefined;
-        const encoded = next.encode(&bytes) catch { self.status = "The color settings could not be encoded."; return; };
-        if (r4std.config.saveDocument(&self.sys, settings.path, encoded) < 0) { self.status = "Could not save the color settings."; return; }
-        if (self.desk.guiSetText("R4OS_APPEARANCE_RELOAD=1") < 0) { self.status = "Saved. Restart the Desktop to apply the profile."; return; }
+        const encoded = next.encode(&bytes) catch {
+            self.status = "The color settings could not be encoded.";
+            return;
+        };
+        if (r4std.config.saveDocument(&self.sys, settings.path, encoded) < 0) {
+            self.status = "Could not save the color settings.";
+            return;
+        }
+        if (self.desk.guiSetText("R4OS_APPEARANCE_RELOAD=1") < 0) {
+            self.status = "Saved. Restart the Desktop to apply the profile.";
+            return;
+        }
         self.status = if (choice.enabled()) "Display profile saved." else "Display profile disabled.";
     }
     fn render(self: *App) void {
-        var paint = switch (r4os.app_gui.beginPaintForSize(&self.draw, self.width, self.height)) { .paint => |value| value, .failure => return };
+        var paint = switch (r4os.app_gui.beginPaintForSize(&self.draw, self.width, self.height)) {
+            .paint => |value| value,
+            .failure => return,
+        };
         defer paint.discard();
-        var commands: [160]a.GuiFrameCommand = undefined; var resources: [12288]u8 = undefined;
+        var commands: [160]a.GuiFrameCommand = undefined;
+        var resources: [12288]u8 = undefined;
         var builder: r4os.FrameCanvas = undefined;
         const canvas = paint.bufferedCanvas(&builder, &commands, &resources);
-        var scratch: [1024]u8 = undefined; var text: [160]u8 = undefined;
+        var scratch: [1024]u8 = undefined;
+        var text: [160]u8 = undefined;
         _ = canvas.clear(face);
         _ = canvas.textClipped(12, 16, self.width - 24, &scratch, "Color settings for the selected monitor", 0, face);
         _ = canvas.textClipped(12, 47, self.width - 24, &scratch, "ICC profile path:", 0, face);
@@ -231,16 +332,23 @@ const App = struct {
                 .intent => std.fmt.bufPrint(&text, "Rendering intent: {s}", .{intents[self.intent]}) catch "",
                 .black_point => if (self.flags & 1 != 0) "Black-point compensation: On" else "Black-point compensation: Off",
                 .calibration => if (self.flags & 2 != 0) "Apply profile calibration: On" else "Apply profile calibration: Off",
-                .encoding => switch (self.signal.transfer) { 3 => "Output: HDR10 / PQ, 10 bit", 4 => "Output: HDR / HLG, 10 bit",
-                    else => if (self.signal.bpc == 10) "Output: SDR, 10 bit" else "Output: SDR, 8 bit" },
+                .encoding => switch (self.signal.transfer) {
+                    3 => "Output: HDR10 / PQ, 10 bit",
+                    4 => "Output: HDR / HLG, 10 bit",
+                    else => if (self.signal.bpc == 10) "Output: SDR, 10 bit" else "Output: SDR, 8 bit",
+                },
                 .range => if (self.signal.range == 1) "RGB range: Full" else "RGB range: Limited",
                 .white => std.fmt.bufPrint(&text, "SDR white: {d} cd/m2", .{self.signal.reference_white / 10000}) catch "",
                 .peak => std.fmt.bufPrint(&text, "Peak: {d} cd/m2", .{self.signal.peak / 10000}) catch "",
-                .test_output => "Test output", .keep => "Keep", .revert => "Revert",
-                .standard => "Reset profile", .save => "Save profile", .close => "Back", .filename => unreachable,
+                .test_output => "Test output",
+                .keep => "Keep",
+                .revert => "Revert",
+                .standard => "Reset profile",
+                .save => "Save profile",
+                .close => "Back",
+                .filename => unreachable,
             };
-            _ = canvas.button(.{ .rect = self.rect(button), .text = label, .focused = self.focus == button,
-                .state = if (!self.enabled(button)) .disabled else if (self.pressed == button) .pressed else .normal, .is_cancel = button == .close }, &scratch);
+            _ = canvas.button(.{ .rect = self.rect(button), .text = label, .focused = self.focus == button, .state = if (!self.enabled(button)) .disabled else if (self.pressed == button) .pressed else .normal, .is_cancel = button == .close }, &scratch);
         }
         _ = canvas.textClipped(12, 412, self.width - 24, &scratch, "SDR gray steps in the current output:", 0, face);
         for (0..16) |i| {
@@ -249,9 +357,7 @@ const App = struct {
             const right = 12 + @divTrunc((self.width - 24) * @as(i32, @intCast(i + 1)), 16);
             _ = canvas.rect(.{ .x = left, .y = 435, .w = right - left, .h = 24 }, level * 0x010101);
         }
-        const status = if (self.client.state.phase == 2) std.fmt.bufPrint(&text, "Keep this color output? Reverting in {d} seconds.",
-            .{(self.client.state.deadline_ns -| (self.sys.monotonicNanoseconds() orelse 0) +| (std.time.ns_per_s - 1)) / std.time.ns_per_s}) catch "Keep this color output?"
-            else self.status;
+        const status = if (self.client.state.phase == 2) std.fmt.bufPrint(&text, "Keep this color output? Reverting in {d} seconds.", .{(self.client.state.deadline_ns -| (self.sys.monotonicNanoseconds() orelse 0) +| (std.time.ns_per_s - 1)) / std.time.ns_per_s}) catch "Keep this color output?" else self.status;
         _ = canvas.textClipped(12, self.height - 82, self.width - 24, &scratch, status, 0, face);
         _ = paint.present();
     }

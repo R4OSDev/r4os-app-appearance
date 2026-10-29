@@ -11,21 +11,40 @@ const face = r4os.gui.default_palette.face;
 const Button = enum { policy, flicker, retry, save, close };
 pub fn run(sys: r4os.r4sys.Context, desk: r4os.r4desk.Context, draw: r4os.r4draw.Context, key: catalog.topology.Key) bool {
     var app: App = .{ .sys = sys, .desk = desk, .draw = draw, .key = key };
-    if (app.read()) |saved| { if (saved.find(key)) |choice| app.policy = choice.policy; }
-        else |_| { app.message = "Could not read the refresh settings."; }
+    if (app.read()) |saved| {
+        if (saved.find(key)) |choice| app.policy = choice.policy;
+    } else |_| {
+        app.message = "Could not read the refresh settings.";
+    }
     _ = desk.guiSetTitle("Variable refresh rate");
     _ = desk.guiSetMinSize(480, 420);
-    app.metrics(); _ = app.poll(); app.render();
+    app.metrics();
+    _ = app.poll();
+    app.render();
     var events = r4os.EventLoop.init(sys, desk, &.{});
     while (!app.exiting and !sys.programShouldClose()) {
         var redraw = true;
         switch (events.wait(r4os.time_contract.timeoutFinite(.{ .nanoseconds = 500 * std.time.ns_per_ms }))) {
             .message => |message| if (message.guiEvent()) |event| switch (@as(a.GuiEventKind, @enumFromInt(event.kind))) {
-                .close => { app.exiting = true; app.close_window = true; },
+                .close => {
+                    app.exiting = true;
+                    app.close_window = true;
+                },
                 .resize => app.metrics(),
                 .key_down => app.keypress(@intCast(event.key & 255)),
-                .mouse_down => { app.pressed = app.hit(event.x, event.y); if (app.pressed) |button| app.focus = button; },
-                .mouse_up => { const button = app.hit(event.x, event.y); if (button != null and button == app.pressed) app.activate(button.?); app.pressed = null; },
+                .input_reset, .focus_lost => {
+                    redraw = app.pressed != null;
+                    app.pressed = null;
+                },
+                .mouse_down => {
+                    app.pressed = app.hit(event.x, event.y);
+                    if (app.pressed) |button| app.focus = button;
+                },
+                .mouse_up => {
+                    const button = app.hit(event.x, event.y);
+                    if (button != null and button == app.pressed) app.activate(button.?);
+                    app.pressed = null;
+                },
                 else => {},
             },
             .timed_out => redraw = false,
@@ -72,7 +91,10 @@ const App = struct {
     }
     fn metrics(self: *App) void {
         var info: a.GuiWindowInfo = .{};
-        if (self.desk.guiWindowInfo(&info) >= 0) { self.width = @max(480, info.client_w); self.height = @max(420, info.client_h); }
+        if (self.desk.guiWindowInfo(&info) >= 0) {
+            self.width = @max(480, info.client_w);
+            self.height = @max(420, info.client_h);
+        }
     }
     fn rect(self: *const App, button: Button) r4os.gui.Rect {
         return switch (button) {
@@ -89,7 +111,10 @@ const App = struct {
     }
     fn keypress(self: *App, key: u8) void {
         const keys = r4os.gui.Key;
-        if (key == keys.escape) { self.exiting = true; return; }
+        if (key == keys.escape) {
+            self.exiting = true;
+            return;
+        }
         if (key == keys.tab or key == keys.shift_tab) {
             self.focus = @enumFromInt((@intFromEnum(self.focus) + @as(u32, if (key == keys.tab) 1 else 4)) % 5);
         } else if (key == keys.enter or key == ' ') self.activate(self.focus);
@@ -97,53 +122,81 @@ const App = struct {
     fn activate(self: *App, button: Button) void {
         switch (button) {
             .policy => self.policy = (self.policy + 1) % 3,
-            .flicker => { self.policy = 0; self.save(true); },
-            .retry => { if (self.policy == 0) self.policy = 1; self.save(false); },
+            .flicker => {
+                self.policy = 0;
+                self.save(true);
+            },
+            .retry => {
+                if (self.policy == 0) self.policy = 1;
+                self.save(false);
+            },
             .save => self.save(null),
             .close => self.exiting = true,
         }
     }
     fn save(self: *App, blocked: ?bool) void {
-        const saved = self.read() catch { self.message = "Could not read the current refresh settings."; return; };
-        const next = changePreferences(&saved, self.key, self.policy, blocked) catch { self.message = "Could not update this monitor's refresh settings."; return; };
+        const saved = self.read() catch {
+            self.message = "Could not read the current refresh settings.";
+            return;
+        };
+        const next = changePreferences(&saved, self.key, self.policy, blocked) catch {
+            self.message = "Could not update this monitor's refresh settings.";
+            return;
+        };
         var bytes: [settings.max_bytes]u8 = undefined;
-        const encoded = next.encode(&bytes) catch { self.message = "Could not encode the refresh settings."; return; };
-        if (r4std.config.saveDocument(&self.sys, settings.path, encoded) < 0) { self.message = "Could not save the refresh settings."; return; }
+        const encoded = next.encode(&bytes) catch {
+            self.message = "Could not encode the refresh settings.";
+            return;
+        };
+        if (r4std.config.saveDocument(&self.sys, settings.path, encoded) < 0) {
+            self.message = "Could not save the refresh settings.";
+            return;
+        }
         const choice = next.find(self.key).?;
         self.policy = choice.policy;
-        if (self.desk.guiSetText("R4OS_APPEARANCE_RELOAD=1") < 0) { self.message = "Saved. Restart the Desktop to apply the policy."; return; }
+        if (self.desk.guiSetText("R4OS_APPEARANCE_RELOAD=1") < 0) {
+            self.message = "Saved. Restart the Desktop to apply the policy.";
+            return;
+        }
         self.message = if (choice.blocked) "VRR stays off. Use Retry VRR to clear the flicker lock." else "Saved. The Desktop applies the policy when eligible.";
     }
     fn render(self: *App) void {
-        var paint = switch (r4os.app_gui.beginPaintForSize(&self.draw, self.width, self.height)) { .paint => |value| value, .failure => return };
+        var paint = switch (r4os.app_gui.beginPaintForSize(&self.draw, self.width, self.height)) {
+            .paint => |value| value,
+            .failure => return,
+        };
         defer paint.discard();
-        var commands: [96]a.GuiFrameCommand = undefined; var resources: [8192]u8 = undefined;
+        var commands: [96]a.GuiFrameCommand = undefined;
+        var resources: [8192]u8 = undefined;
         var builder: r4os.FrameCanvas = undefined;
         const canvas = paint.bufferedCanvas(&builder, &commands, &resources);
-        var scratch: [256]u8 = undefined; var text: [180]u8 = undefined;
+        var scratch: [256]u8 = undefined;
+        var text: [180]u8 = undefined;
         _ = canvas.rect(.{ .x = 0, .y = 0, .w = self.width, .h = self.height }, face);
         _ = canvas.textClipped(12, 14, self.width - 24, &scratch, "Variable refresh rate for this monitor", 0, face);
         if (self.state) |state| {
             const cap = state.capabilities;
             const capable = cap.flags & a.gfx_refresh_cap_capable != 0;
-            const ability = if (capable) std.fmt.bufPrint(&text, "Supported range: {d}.{d:0>3} - {d}.{d:0>3} Hz",
-                .{cap.min_millihz/1000,cap.min_millihz%1000,cap.max_millihz/1000,cap.max_millihz%1000}) catch "" else "VRR is unavailable for this mode or output.";
+            const ability = if (capable) std.fmt.bufPrint(&text, "Supported range: {d}.{d:0>3} - {d}.{d:0>3} Hz", .{ cap.min_millihz / 1000, cap.min_millihz % 1000, cap.max_millihz / 1000, cap.max_millihz % 1000 }) catch "" else "VRR is unavailable for this mode or output.";
             _ = canvas.textClipped(12, 44, self.width - 24, &scratch, ability, 0, face);
             _ = canvas.textClipped(12, 70, self.width - 24, &scratch, names.phase(state.status.phase), 0, face);
             _ = canvas.textClipped(12, 94, self.width - 24, &scratch, names.reason(state.status.reason), 0x404040, face);
             const measured = state.measured;
-            const observed = if (measured.samples != 0) std.fmt.bufPrint(&text, "Measured mean: {d}.{d:0>3} Hz ({d} intervals)",
-                .{measured.millihz/1000,measured.millihz%1000,measured.samples}) catch "" else "Measured refresh: waiting for hardware observations";
+            const observed = if (measured.samples != 0) std.fmt.bufPrint(&text, "Measured mean: {d}.{d:0>3} Hz ({d} intervals)", .{ measured.millihz / 1000, measured.millihz % 1000, measured.samples }) catch "" else "Measured refresh: waiting for hardware observations";
             _ = canvas.textClipped(12, 126, self.width - 24, &scratch, observed, 0, face);
-            const nominal = std.fmt.bufPrint(&text, "Nominal mode: {d}.{d:0>3} Hz", .{cap.nominal_millihz/1000,cap.nominal_millihz%1000}) catch "";
+            const nominal = std.fmt.bufPrint(&text, "Nominal mode: {d}.{d:0>3} Hz", .{ cap.nominal_millihz / 1000, cap.nominal_millihz % 1000 }) catch "";
             _ = canvas.textClipped(12, 152, self.width - 24, &scratch, nominal, 0x404040, face);
         } else _ = canvas.textClipped(12, 44, self.width - 24, &scratch, "VRR state unavailable. Ordinary presentation remains available.", 0, face);
         _ = canvas.textClipped(12, self.height - 82, self.width - 24, &scratch, self.message, 0, face);
         for (std.enums.values(Button)) |button| {
-            const label = switch (button) { .policy => names.policy(self.policy), .flicker => "Flicker: disable VRR", .retry => "Retry VRR",
-                .save => "Save policy", .close => "Back" };
-            _ = canvas.button(.{ .rect = self.rect(button), .text = label, .focused = self.focus == button,
-                .state = if (self.pressed == button) .pressed else .normal, .is_cancel = button == .close }, &scratch);
+            const label = switch (button) {
+                .policy => names.policy(self.policy),
+                .flicker => "Flicker: disable VRR",
+                .retry => "Retry VRR",
+                .save => "Save policy",
+                .close => "Back",
+            };
+            _ = canvas.button(.{ .rect = self.rect(button), .text = label, .focused = self.focus == button, .state = if (self.pressed == button) .pressed else .normal, .is_cancel = button == .close }, &scratch);
         }
         _ = paint.present();
     }
@@ -160,7 +213,8 @@ fn changePreferences(saved: *const settings.Config, key: catalog.topology.Key, p
 pub fn exercise() !void {
     const t = std.testing;
     const key: catalog.topology.Key = .{ .adapter = 17, .connector = 3, .receiver = @splat(1) };
-    var other = key; other.connector = 4;
+    var other = key;
+    other.connector = 4;
     var config: settings.Config = .{};
     config = try changePreferences(&config, other, 2, null);
     const untouched = config.find(other).?;

@@ -112,6 +112,12 @@ const App = struct {
                             self.updateMetrics();
                             self.render();
                         },
+                        .input_reset, .focus_lost => {
+                            const repaint = self.pressed != null or self.dialog_pressed_action != .none;
+                            self.pressed = null;
+                            self.dialog_pressed_action = .none;
+                            if (repaint) self.render();
+                        },
                         .mouse_down => self.handleMouseDown(event.x, event.y),
                         .mouse_up => self.handleMouseUp(event.x, event.y),
                         .key_down => self.handleKey(event.key),

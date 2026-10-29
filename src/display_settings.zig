@@ -44,7 +44,9 @@ const App = struct {
         _ = self.desk.guiSetTitle("Display settings");
         _ = self.desk.guiSetMinSize(480, 460);
         defer self.client.close(&self.sys);
-        self.refreshCatalog(); self.metrics(); self.render();
+        self.refreshCatalog();
+        self.metrics();
+        self.render();
         var events = r4os.EventLoop.init(self.sys, self.desk, &.{});
         while (!self.exiting and !self.sys.programShouldClose()) {
             const delay: u64 = if (self.waiting()) 100 else 500;
@@ -54,10 +56,18 @@ const App = struct {
                     .close => self.exiting = true,
                     .resize => self.metrics(),
                     .key_down => self.key(@intCast(event.key & 0xff)),
+                    .input_reset, .focus_lost => {
+                        redraw = self.pressed != null or self.dragging != null;
+                        self.pressed = null;
+                        self.dragging = null;
+                    },
                     .mouse_down => self.mouseDown(event.x, event.y),
                     .mouse_move => self.mouseMove(event.x, event.y),
                     .mouse_up => {
-                        if (self.dragging != null) { self.snap(); self.dragging = null; }
+                        if (self.dragging != null) {
+                            self.snap();
+                            self.dragging = null;
+                        }
                         const target = self.hit(event.x, event.y);
                         if (target != null and target == self.pressed) self.activate(target.?);
                         self.pressed = null;
@@ -72,9 +82,13 @@ const App = struct {
             _ = if (self.client.pending != null) self.client.retry(&self.sys) else self.client.poll(&self.sys);
             if (!self.dirty and !std.meta.eql(before.layout, self.client.state.layout)) {
                 self.edit = control.decode(&self.client.state.layout) catch self.edit;
-                self.selected = @min(self.selected, self.edit.count - 1); self.refreshCatalog();
+                self.selected = @min(self.selected, self.edit.count - 1);
+                self.refreshCatalog();
             }
-            if (before.phase != 2 and self.client.state.phase == 2) { self.focus = .revert; self.pressed = null; }
+            if (before.phase != 2 and self.client.state.phase == 2) {
+                self.focus = .revert;
+                self.pressed = null;
+            }
             const second = if (self.client.state.phase == 2) (self.sys.monotonicNanoseconds() orelse 0) / std.time.ns_per_s else 0;
             redraw = redraw or !std.meta.eql(before, self.client.state) or previous_error != self.client.last_error or second != self.displayed_second;
             self.displayed_second = second;
@@ -84,10 +98,17 @@ const App = struct {
     }
     fn metrics(self: *App) void {
         var info: a.GuiWindowInfo = .{};
-        if (self.desk.guiWindowInfo(&info) >= 0) { self.width = @max(480, info.client_w); self.height = @max(460, info.client_h); }
+        if (self.desk.guiWindowInfo(&info) >= 0) {
+            self.width = @max(480, info.client_w);
+            self.height = @max(460, info.client_h);
+        }
     }
-    fn waiting(self: *const App) bool { return self.client.pending != null or control.active(self.client.state.phase); }
-    fn mine(self: *const App) bool { return std.meta.eql(self.client.owner, self.client.state.owner); }
+    fn waiting(self: *const App) bool {
+        return self.client.pending != null or control.active(self.client.state.phase);
+    }
+    fn mine(self: *const App) bool {
+        return std.meta.eql(self.client.owner, self.client.state.owner);
+    }
     fn refreshCatalog(self: *App) void {
         self.mode_count = 0;
         self.snapshot = catalog.Snapshot.read(&self.draw) catch return;
@@ -99,10 +120,14 @@ const App = struct {
         if (entry.info.mode_count > self.modes.len) return;
         for (0..entry.info.mode_count) |i| {
             var mode: a.GfxOutputMode = .{};
-            if (self.draw.outputs().mode(&entry.info.identity, @intCast(i), &mode) != a.gfx_output_ok) { self.mode_count = 0; return; }
+            if (self.draw.outputs().mode(&entry.info.identity, @intCast(i), &mode) != a.gfx_output_ok) {
+                self.mode_count = 0;
+                return;
+            }
             if (mode.width == 0 or mode.height == 0 or mode.pixel_clock_hz == 0 or
                 mode.flags & (a.gfx_output_mode_geometry_only | a.gfx_output_mode_interlaced | a.gfx_output_mode_420_only) != 0) continue;
-            self.modes[self.mode_count] = mode; self.mode_count += 1;
+            self.modes[self.mode_count] = mode;
+            self.mode_count += 1;
         }
     }
     fn enabled(self: *const App, button: Button) bool {
@@ -147,7 +172,11 @@ const App = struct {
         };
     }
     fn shown(self: *const App, button: Button) bool {
-        return switch (button) { .refresh, .apply => !self.waiting(), .keep, .revert => self.waiting(), else => true };
+        return switch (button) {
+            .refresh, .apply => !self.waiting(),
+            .keep, .revert => self.waiting(),
+            else => true,
+        };
     }
     fn hit(self: *const App, x: i32, y: i32) ?Button {
         for (all_buttons) |button| if (self.shown(button) and self.enabled(button) and self.rect(button).contains(x, y)) return button;
@@ -155,13 +184,19 @@ const App = struct {
     }
     fn key(self: *App, code: u8) void {
         const keys = r4os.gui.Key;
-        if (code == keys.escape) { if (self.enabled(.revert)) self.activate(.revert) else self.exiting = true; return; }
+        if (code == keys.escape) {
+            if (self.enabled(.revert)) self.activate(.revert) else self.exiting = true;
+            return;
+        }
         if (code == keys.tab or code == keys.shift_tab) {
             var index: usize = @intFromEnum(self.focus);
             for (0..all_buttons.len) |_| {
                 index = if (code == keys.shift_tab) (index + all_buttons.len - 1) % all_buttons.len else (index + 1) % all_buttons.len;
                 const target = all_buttons[index];
-                if (self.shown(target) and self.enabled(target)) { self.focus = target; break; }
+                if (self.shown(target) and self.enabled(target)) {
+                    self.focus = target;
+                    break;
+                }
             }
         } else if (code == keys.enter or code == ' ') self.activate(self.focus);
     }
@@ -169,19 +204,34 @@ const App = struct {
         if (!self.enabled(button)) return;
         const value = &self.edit.outputs[self.selected];
         switch (button) {
-            .monitor => { self.selected = (self.selected + 1) % self.edit.count; self.refreshCatalog(); return; },
+            .monitor => {
+                self.selected = (self.selected + 1) % self.edit.count;
+                self.refreshCatalog();
+                return;
+            },
             .mode_previous, .mode_next => {
                 var selected: usize = 0;
-                for (self.modes[0..self.mode_count], 0..) |mode, i| if (mode.width == value.view.pixel_w and mode.height == value.view.pixel_h and mode.refresh_millihz == value.refresh_millihz) { selected = i; break; };
+                for (self.modes[0..self.mode_count], 0..) |mode, i| if (mode.width == value.view.pixel_w and mode.height == value.view.pixel_h and mode.refresh_millihz == value.refresh_millihz) {
+                    selected = i;
+                    break;
+                };
                 selected = if (button == .mode_previous) (selected + self.mode_count - 1) % self.mode_count else (selected + 1) % self.mode_count;
-                const mode = self.modes[selected]; value.view.pixel_w = mode.width; value.view.pixel_h = mode.height; value.refresh_millihz = mode.refresh_millihz;
+                const mode = self.modes[selected];
+                value.view.pixel_w = mode.width;
+                value.view.pixel_h = mode.height;
+                value.refresh_millihz = mode.refresh_millihz;
             },
             .scale_down, .scale_up => {
                 var chosen: u32 = value.view.scale;
                 if (button == .scale_up) {
-                    for (scales) |scale| if (scale > value.view.scale) { chosen = scale; break; };
+                    for (scales) |scale| if (scale > value.view.scale) {
+                        chosen = scale;
+                        break;
+                    };
                 } else {
-                    for (scales) |scale| if (scale < value.view.scale) { chosen = scale; };
+                    for (scales) |scale| if (scale < value.view.scale) {
+                        chosen = scale;
+                    };
                 }
                 value.view.scale = chosen;
             },
@@ -193,44 +243,86 @@ const App = struct {
             .left, .right, .above, .below, .clone => if (!self.arrange(button)) return,
             .enabled => value.enabled = !value.enabled,
             .colors => {
-                if (@import("display_color.zig").run(self.sys, self.desk, self.draw, self.raw.?, value.key, &self.client)) { self.exiting = true; return; }
-                _ = self.desk.guiSetTitle("Display settings"); _ = self.desk.guiSetMinSize(480, 460); self.metrics(); self.refreshCatalog();
+                if (@import("display_color.zig").run(self.sys, self.desk, self.draw, self.raw.?, value.key, &self.client)) {
+                    self.exiting = true;
+                    return;
+                }
+                _ = self.desk.guiSetTitle("Display settings");
+                _ = self.desk.guiSetMinSize(480, 460);
+                self.metrics();
+                self.refreshCatalog();
                 return;
             },
             .vrr => {
-                if (@import("display_refresh.zig").run(self.sys, self.desk, self.draw, value.key)) { self.exiting = true; return; }
-                _ = self.desk.guiSetTitle("Display settings"); _ = self.desk.guiSetMinSize(480, 460); self.metrics(); self.refreshCatalog();
+                if (@import("display_refresh.zig").run(self.sys, self.desk, self.draw, value.key)) {
+                    self.exiting = true;
+                    return;
+                }
+                _ = self.desk.guiSetTitle("Display settings");
+                _ = self.desk.guiSetMinSize(480, 460);
+                self.metrics();
+                self.refreshCatalog();
                 return;
             },
             .brightness => {
-                if (@import("display_brightness.zig").run(self.sys, self.desk, self.draw, value.key)) { self.exiting = true; return; }
-                _ = self.desk.guiSetTitle("Display settings"); _ = self.desk.guiSetMinSize(480, 460); self.metrics(); self.refreshCatalog();
+                if (@import("display_brightness.zig").run(self.sys, self.desk, self.draw, value.key)) {
+                    self.exiting = true;
+                    return;
+                }
+                _ = self.desk.guiSetTitle("Display settings");
+                _ = self.desk.guiSetMinSize(480, 460);
+                self.metrics();
+                self.refreshCatalog();
                 return;
             },
             .refresh => {
                 if (self.client.poll(&self.sys)) {
                     self.edit = control.decode(&self.client.state.layout) catch self.edit;
-                    self.selected = @min(self.selected, self.edit.count - 1); self.dirty = false; self.refreshCatalog();
+                    self.selected = @min(self.selected, self.edit.count - 1);
+                    self.dirty = false;
+                    self.refreshCatalog();
                     self.status = "Current display settings loaded.";
                 }
                 return;
             },
             .graphics => {
-                if (@import("graphics_page.zig").run(self.sys, self.desk, self.draw)) { self.exiting = true; return; }
-                _ = self.desk.guiSetTitle("Display settings"); _ = self.desk.guiSetMinSize(480, 460); self.metrics(); self.refreshCatalog();
+                if (@import("graphics_page.zig").run(self.sys, self.desk, self.draw)) {
+                    self.exiting = true;
+                    return;
+                }
+                _ = self.desk.guiSetTitle("Display settings");
+                _ = self.desk.guiSetMinSize(480, 460);
+                self.metrics();
+                self.refreshCatalog();
                 return;
             },
             .apply => {
                 const encoded = control.encode(&self.edit);
-                const layout = control.decode(&encoded) catch { self.status = "Separate overlapping displays, or use matching clone sizes."; return; };
-                if (self.client.request(&self.sys, 1, &layout)) { self.dirty = false; self.status = "Testing display settings..."; }
+                const layout = control.decode(&encoded) catch {
+                    self.status = "Separate overlapping displays, or use matching clone sizes.";
+                    return;
+                };
+                if (self.client.request(&self.sys, 1, &layout)) {
+                    self.dirty = false;
+                    self.status = "Testing display settings...";
+                }
                 return;
             },
-            .keep => { _ = self.client.request(&self.sys, 2, null); return; },
-            .revert => { _ = self.client.request(&self.sys, 3, null); return; },
-            .close => { self.exiting = true; return; },
+            .keep => {
+                _ = self.client.request(&self.sys, 2, null);
+                return;
+            },
+            .revert => {
+                _ = self.client.request(&self.sys, 3, null);
+                return;
+            },
+            .close => {
+                self.exiting = true;
+                return;
+            },
         }
-        self.dirty = true; self.status = "Changes are a preview. Test them before keeping them.";
+        self.dirty = true;
+        self.status = "Changes are a preview. Test them before keeping them.";
     }
     fn anchor(self: *const App) ?usize {
         if (self.edit.primary != self.selected) return self.edit.primary;
@@ -244,9 +336,15 @@ const App = struct {
         const bounds = other.view.logical() catch return false;
         const own = value.view.logical() catch return false;
         if (button == .clone) {
-            if (bounds.w != own.w or bounds.h != own.h) { self.status = "Cloning needs matching desktop sizes. Adjust resolution or scale."; return false; }
+            if (bounds.w != own.w or bounds.h != own.h) {
+                self.status = "Cloning needs matching desktop sizes. Adjust resolution or scale.";
+                return false;
+            }
             const group = if (other.clone_group != 0) other.clone_group else @as(u8, @intCast(anchor_index + 1));
-            other.clone_group = group; value.clone_group = group; value.view.origin = other.view.origin; return true;
+            other.clone_group = group;
+            value.clone_group = group;
+            value.view.origin = other.view.origin;
+            return true;
         }
         value.clone_group = 0;
         value.view.origin = other.view.origin;
@@ -261,38 +359,41 @@ const App = struct {
     }
     const Diagram = struct { x: i64, y: i64, numerator: i64, denominator: i64, left: i32, top: i32 };
     fn diagram(self: *const App) Diagram {
-        var x: i64 = std.math.maxInt(i32); var y = x;
-        var right: i64 = std.math.minInt(i32); var bottom = right;
+        var x: i64 = std.math.maxInt(i32);
+        var y = x;
+        var right: i64 = std.math.minInt(i32);
+        var bottom = right;
         for (self.edit.outputs[0..self.edit.count]) |output| {
             const rect_value = output.view.logical() catch continue;
-            x = @min(x, rect_value.x); y = @min(y, rect_value.y);
-            right = @max(right, rect_value.right()); bottom = @max(bottom, rect_value.bottom());
+            x = @min(x, rect_value.x);
+            y = @min(y, rect_value.y);
+            right = @max(right, rect_value.right());
+            bottom = @max(bottom, rect_value.bottom());
         }
-        const w: i64 = @max(1, right - x); const h: i64 = @max(1, bottom - y);
+        const w: i64 = @max(1, right - x);
+        const h: i64 = @max(1, bottom - y);
         const available: i64 = self.width - 48;
         const numerator: i64 = if (available * h < 88 * w) available else 88;
         const denominator: i64 = if (available * h < 88 * w) w else h;
-        return .{ .x = x, .y = y, .numerator = numerator, .denominator = denominator,
-            .left = 24 + @as(i32, @intCast(@divTrunc(available - @divTrunc(w * numerator, denominator), 2))),
-            .top = 48 + @as(i32, @intCast(@divTrunc(88 - @divTrunc(h * numerator, denominator), 2))) };
+        return .{ .x = x, .y = y, .numerator = numerator, .denominator = denominator, .left = 24 + @as(i32, @intCast(@divTrunc(available - @divTrunc(w * numerator, denominator), 2))), .top = 48 + @as(i32, @intCast(@divTrunc(88 - @divTrunc(h * numerator, denominator), 2))) };
     }
     fn outputBox(self: *const App, index: usize) Rect {
         const diagram_value = self.diagram();
         const bounds = self.edit.outputs[index].view.logical() catch return .{ .x = 0, .y = 0, .w = 0, .h = 0 };
-        return .{ .x = diagram_value.left + @as(i32, @intCast(@divTrunc((@as(i64, bounds.x) - diagram_value.x) * diagram_value.numerator, diagram_value.denominator))),
-            .y = diagram_value.top + @as(i32, @intCast(@divTrunc((@as(i64, bounds.y) - diagram_value.y) * diagram_value.numerator, diagram_value.denominator))),
-            .w = @max(4, @as(i32, @intCast(@divTrunc(bounds.w * diagram_value.numerator, diagram_value.denominator)))),
-            .h = @max(4, @as(i32, @intCast(@divTrunc(bounds.h * diagram_value.numerator, diagram_value.denominator)))) };
+        return .{ .x = diagram_value.left + @as(i32, @intCast(@divTrunc((@as(i64, bounds.x) - diagram_value.x) * diagram_value.numerator, diagram_value.denominator))), .y = diagram_value.top + @as(i32, @intCast(@divTrunc((@as(i64, bounds.y) - diagram_value.y) * diagram_value.numerator, diagram_value.denominator))), .w = @max(4, @as(i32, @intCast(@divTrunc(bounds.w * diagram_value.numerator, diagram_value.denominator)))), .h = @max(4, @as(i32, @intCast(@divTrunc(bounds.h * diagram_value.numerator, diagram_value.denominator)))) };
     }
     fn mouseDown(self: *App, x: i32, y: i32) void {
         self.pressed = self.hit(x, y);
-        if (self.pressed) |button| { self.focus = button; return; }
+        if (self.pressed) |button| {
+            self.focus = button;
+            return;
+        }
         if (self.waiting()) return;
         for (0..self.edit.count) |i| if (self.outputBox(i).contains(x, y)) {
-            self.selected = i; self.refreshCatalog();
+            self.selected = i;
+            self.refreshCatalog();
             const preview = self.diagram();
-            if (self.edit.outputs[i].enabled) self.dragging = .{ .x = x, .y = y, .origin = self.edit.outputs[i].view.origin,
-                .numerator = preview.numerator, .denominator = preview.denominator };
+            if (self.edit.outputs[i].enabled) self.dragging = .{ .x = x, .y = y, .origin = self.edit.outputs[i].view.origin, .numerator = preview.numerator, .denominator = preview.denominator };
             break;
         };
     }
@@ -301,9 +402,9 @@ const App = struct {
         const value = &self.edit.outputs[self.selected];
         const dx = @divTrunc((@as(i64, x) - dragging.x) * dragging.denominator, dragging.numerator);
         const dy = @divTrunc((@as(i64, y) - dragging.y) * dragging.denominator, dragging.numerator);
-        value.view.origin = .{ .x = @intCast(std.math.clamp(@as(i64, dragging.origin.x) + dx, -131072, 131072)),
-            .y = @intCast(std.math.clamp(@as(i64, dragging.origin.y) + dy, -131072, 131072)) };
-        value.clone_group = 0; self.dirty = true;
+        value.view.origin = .{ .x = @intCast(std.math.clamp(@as(i64, dragging.origin.x) + dx, -131072, 131072)), .y = @intCast(std.math.clamp(@as(i64, dragging.origin.y) + dy, -131072, 131072)) };
+        value.clone_group = 0;
+        self.dirty = true;
     }
     fn snap(self: *App) void {
         const value = &self.edit.outputs[self.selected];
@@ -312,21 +413,32 @@ const App = struct {
             if (i == self.selected or !other.enabled) continue;
             const bounds = other.view.logical() catch continue;
             for ([_]i64{ bounds.x, bounds.right(), @as(i64, bounds.x) - own.w }) |x|
-                if (@abs(@as(i64, value.view.origin.x) - x) <= 32) { value.view.origin.x = @intCast(x); break; };
+                if (@abs(@as(i64, value.view.origin.x) - x) <= 32) {
+                    value.view.origin.x = @intCast(x);
+                    break;
+                };
             for ([_]i64{ bounds.y, bounds.bottom(), @as(i64, bounds.y) - own.h }) |y|
-                if (@abs(@as(i64, value.view.origin.y) - y) <= 32) { value.view.origin.y = @intCast(y); break; };
+                if (@abs(@as(i64, value.view.origin.y) - y) <= 32) {
+                    value.view.origin.y = @intCast(y);
+                    break;
+                };
         }
     }
     fn render(self: *App) void {
         var paint = switch (r4os.app_gui.beginPaintForSize(&self.draw, self.width, self.height)) {
-            .paint => |value| value, .failure => { self.paint_failed = true; return; },
+            .paint => |value| value,
+            .failure => {
+                self.paint_failed = true;
+                return;
+            },
         };
         defer paint.discard();
         var commands: [160]a.GuiFrameCommand = undefined;
         var resources: [12288]u8 = undefined;
         var builder: r4os.FrameCanvas = undefined;
         const canvas = paint.bufferedCanvas(&builder, &commands, &resources);
-        var scratch: [512]u8 = undefined; var text: [192]u8 = undefined;
+        var scratch: [512]u8 = undefined;
+        var text: [192]u8 = undefined;
         _ = canvas.clear(face);
         _ = canvas.textClipped(12, 16, self.width - 170, &scratch, "Displays - drag to arrange", 0, face);
         _ = canvas.rect(.{ .x = 12, .y = 42, .w = self.width - 24, .h = 100 }, 0xffffff);
@@ -340,20 +452,28 @@ const App = struct {
         }
         const selected = self.edit.outputs[self.selected];
         var name: []const u8 = "Display";
-        for (self.snapshot.entries[0..self.snapshot.count]) |*entry| if (std.meta.eql(entry.key, selected.key) and entry.name[0] != 0) { name = std.mem.sliceTo(&entry.name, 0); break; };
+        for (self.snapshot.entries[0..self.snapshot.count]) |*entry| if (std.meta.eql(entry.key, selected.key) and entry.name[0] != 0) {
+            name = std.mem.sliceTo(&entry.name, 0);
+            break;
+        };
         const monitor = std.fmt.bufPrint(&text, "{s} {d}  ({d}, {d})", .{ name, self.selected + 1, selected.view.origin.x, selected.view.origin.y }) catch "";
         _ = canvas.textClipped(12, 151, self.width - 24, &scratch, monitor, 0, face);
         const mode = if (selected.refresh_millihz == 0)
             std.fmt.bufPrint(&text, "{d} x {d}, current refresh", .{ selected.view.pixel_w, selected.view.pixel_h }) catch ""
-            else std.fmt.bufPrint(&text, "{d} x {d}, {d}.{d:0>3} Hz", .{ selected.view.pixel_w, selected.view.pixel_h, selected.refresh_millihz / 1000, selected.refresh_millihz % 1000 }) catch "";
+        else
+            std.fmt.bufPrint(&text, "{d} x {d}, {d}.{d:0>3} Hz", .{ selected.view.pixel_w, selected.view.pixel_h, selected.refresh_millihz / 1000, selected.refresh_millihz % 1000 }) catch "";
         _ = canvas.textClipped(12, 181, self.width - 130, &scratch, mode, 0, face);
-        _ = canvas.textClipped(12, 219, 88, &scratch, std.fmt.bufPrint(&text, "Scale {d}%", .{ selected.view.scale * 100 / 120 }) catch "", 0, face);
+        _ = canvas.textClipped(12, 219, 88, &scratch, std.fmt.bufPrint(&text, "Scale {d}%", .{selected.view.scale * 100 / 120}) catch "", 0, face);
         var status = self.status;
         if (self.client.last_error != 0) status = switch (self.client.last_error) {
-            -1 => "Invalid layout. Adjust the display arrangement.", -2 => "A display change is already in progress.",
-            -3 => "Display settings are currently unavailable.", -4 => "Displays changed. Refresh before trying again.",
-            -5 => "Another settings window owns this confirmation.", -6 => "Settings applied, but saving them failed.",
-            -7 => "The requested display mode is not available.", else => "The display change failed.",
+            -1 => "Invalid layout. Adjust the display arrangement.",
+            -2 => "A display change is already in progress.",
+            -3 => "Display settings are currently unavailable.",
+            -4 => "Displays changed. Refresh before trying again.",
+            -5 => "Another settings window owns this confirmation.",
+            -6 => "Settings applied, but saving them failed.",
+            -7 => "The requested display mode is not available.",
+            else => "The display change failed.",
         } else switch (self.client.state.phase) {
             1 => status = "Applying display settings...",
             2 => {
@@ -371,17 +491,30 @@ const App = struct {
         for (all_buttons) |button| {
             if (!self.shown(button)) continue;
             const label = switch (button) {
-                .monitor => "Next display", .mode_previous => "<", .mode_next => ">", .scale_down => "-", .scale_up => "+",
+                .monitor => "Next display",
+                .mode_previous => "<",
+                .mode_next => ">",
+                .scale_down => "-",
+                .scale_up => "+",
                 .rotate => std.fmt.bufPrint(&text, "Rotate: {d}", .{@as(u32, @intFromEnum(selected.view.rotation)) * 90}) catch "",
                 .primary => if (selected.primary) "Primary display" else "Make primary",
-                .left => "Left", .right => "Right", .above => "Above", .below => "Below", .clone => "Clone",
-                .enabled => if (selected.enabled) "Display enabled" else "Enable display", .refresh => "Refresh", .apply => "Test changes",
-                .keep => "Keep", .revert => "Revert", .close => "Close", .colors => "Color settings...", .vrr => "VRR settings...",
-                .graphics => "Graphics driver...", .brightness => "Brightness...",
+                .left => "Left",
+                .right => "Right",
+                .above => "Above",
+                .below => "Below",
+                .clone => "Clone",
+                .enabled => if (selected.enabled) "Display enabled" else "Enable display",
+                .refresh => "Refresh",
+                .apply => "Test changes",
+                .keep => "Keep",
+                .revert => "Revert",
+                .close => "Close",
+                .colors => "Color settings...",
+                .vrr => "VRR settings...",
+                .graphics => "Graphics driver...",
+                .brightness => "Brightness...",
             };
-            _ = canvas.button(.{ .rect = self.rect(button), .text = label, .focused = self.focus == button,
-                .state = if (!self.enabled(button)) .disabled else if (self.pressed == button) .pressed else .normal,
-                .is_cancel = button == .revert or button == .close }, &scratch);
+            _ = canvas.button(.{ .rect = self.rect(button), .text = label, .focused = self.focus == button, .state = if (!self.enabled(button)) .disabled else if (self.pressed == button) .pressed else .normal, .is_cancel = button == .revert or button == .close }, &scratch);
         }
         const result = paint.present();
         if (result < 0 and !self.paint_failed) self.sys.println("Display settings: frame submission failed.");
@@ -396,14 +529,14 @@ pub fn exercise() !void {
         .{ .key = .{ .adapter = 1, .connector = 1 }, .primary = true, .view = .{ .pixel_w = 1280, .pixel_h = 720 }, .refresh_millihz = 60000 },
         .{ .key = .{ .adapter = 1, .connector = 2 }, .view = .{ .pixel_w = 2560, .pixel_h = 1440, .scale = 240, .origin = .{ .x = 1280 } }, .refresh_millihz = 100000 },
     };
-    var app: App = .{ .sys = undefined, .desk = undefined, .draw = undefined, .client = .{},
-        .edit = try topology.Layout.init(&values, 1), .selected = 1 };
+    var app: App = .{ .sys = undefined, .desk = undefined, .draw = undefined, .client = .{}, .edit = try topology.Layout.init(&values, 1), .selected = 1 };
     app.activate(.clone);
     var wire = control.encode(&app.edit);
     _ = try control.decode(&wire);
     try t.expect(app.edit.outputs[1].clone_group != 0);
     try t.expect(app.edit.outputs[0].interval() != app.edit.outputs[1].interval());
-    app.activate(.primary); app.activate(.rotate);
+    app.activate(.primary);
+    app.activate(.rotate);
     wire = control.encode(&app.edit);
     try t.expectError(error.Clone, control.decode(&wire));
     app.activate(.left);
@@ -413,12 +546,15 @@ pub fn exercise() !void {
     try t.expectEqual(topology.Point{}, moved.outputs[1].view.origin);
     try t.expect(moved.outputs[0].view.origin.x > 0);
     try t.expect(!app.enabled(.enabled));
-    app.selected = 0; app.activate(.enabled);
-    wire = control.encode(&app.edit); _ = try control.decode(&wire);
+    app.selected = 0;
+    app.activate(.enabled);
+    wire = control.encode(&app.edit);
+    _ = try control.decode(&wire);
     try t.expect(!app.edit.outputs[0].enabled and app.edit.outputs[1].enabled);
     app.client.state.phase = 2;
     try t.expect(!app.enabled(.apply) and !app.enabled(.rotate));
     app.client.state.phase = 0;
-    app.width = 2400; app.height = 1600;
+    app.width = 2400;
+    app.height = 1600;
     try t.expect(app.outputBox(1).w > 0 and app.outputBox(1).h > 0);
 }
