@@ -7,7 +7,7 @@ Configuration text validation imports R4STD `TEXT_V1` explicitly. The existing
 
 ## Package
 
-- Version: `0.1.24`
+- Version: `0.1.32`
 - Image target: `/R4OS/SOFTWARE/DESKTOP/APPEARANCE.R4X`
 - Image scope: `full`
 - Canonical project manifest: `module.R4MF`
@@ -90,3 +90,15 @@ or glyph capability is implied.
 0.85.44: Rebuilt with SDK0.64.57 and the shared R4STD Unicode17.0.0
 extended grapheme editing boundaries. Byte offsets, scalar font advances
 and grapheme clusters are distinct; no shaping or BiDi support is implied.
+
+API migration 0.90.67
+---------------------
+App2 uses the normal SDK201, Contract93 and Libraries57 source selection.
+Platform and technical R4STD/R4IMG/R4GFX entry points use Query2. The named
+TEXT/SETTINGS/CONFIG/API_V1/COLOR_V1 library interfaces retain their versions.
+The common FilePicker owns two bounded96-row buffers. It advances in bounded
+batches through EventLoop, retains the previous directory on failure and
+checks whole FileMetadata2 identities. Choosing an image changes the pending
+selection. Apply or OK saves it through the existing configuration library.
+Font publication rebuilds Canvas and layout. Existing display transactions,
+color policy and checked startup replacement keep their original owners.

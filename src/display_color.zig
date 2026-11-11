@@ -9,9 +9,9 @@ const a = r4os.abi;
 const face = r4os.gui.default_palette.face;
 const Button = enum { filename, intent, black_point, calibration, encoding, range, white, peak, test_output, keep, revert, standard, save, close };
 const intents = [_][]const u8{ "Perceptual", "Relative colorimetric", "Saturation", "Absolute colorimetric" };
-pub fn run(sys: r4os.r4sys.Context, desk: r4os.r4desk.Context, draw: r4os.r4draw.Context, raw: *const a.R4XStartContext, key: catalog.topology.Key, client: *catalog.control.Client) bool {
+pub fn run(sys: r4os.r4sys.Context, desk: r4os.r4desk.Context, draw: r4os.r4draw.Context, raw: *const r4os.platform2.abi.R4XStartContext2, key: catalog.topology.Key, client: *catalog.control.Client) bool {
     if (!key.persistable()) return false;
-    const colors = gfx.ColorV1Client.init(raw) catch return false;
+    const colors = gfx.ColorV1Client.init2(raw) catch return false;
     var app: App = .{ .sys = sys, .desk = desk, .draw = draw, .colors = colors, .key = key, .client = client };
     defer client.close(&sys);
     app.load();
@@ -30,7 +30,7 @@ pub fn run(sys: r4os.r4sys.Context, desk: r4os.r4desk.Context, draw: r4os.r4draw
                     app.exiting = true;
                     app.close_window = true;
                 },
-                .resize => app.metrics(),
+                .resize, .font_changed => app.metrics(),
                 .key_down => app.keypress(event.key),
                 .input_reset, .focus_lost => {
                     redraw = app.pressed != null;

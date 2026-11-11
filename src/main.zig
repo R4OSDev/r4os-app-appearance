@@ -1,20 +1,24 @@
+const std = @import("std");
 const r4os = @import("r4os");
+const picker = r4os.file_picker;
 const r4img = @import("r4img");
 const r4std = @import("r4std");
 const model = @import("model.zig");
 
 const AppApi = struct {
+    app: *const r4os.App2,
     sys: r4os.r4sys.Context,
     desk: r4os.r4desk.Context,
     draw: r4os.r4draw.Context,
     img: r4img.Context,
 
-    fn init(r4_app: *r4os.App) ?AppApi {
+    fn init(r4_app: *r4os.App2) ?AppApi {
         return .{
+            .app = r4_app,
             .sys = r4_app.system(),
             .desk = r4_app.desktop() orelse return null,
             .draw = r4_app.drawing() orelse return null,
-            .img = r4img.Context.init(r4_app.startContext()) orelse return null,
+            .img = r4img.Context.init2(r4_app.startContext()) orelse return null,
         };
     }
 };
@@ -48,11 +52,10 @@ const swatch_gap: i32 = 4;
 const swatch_columns: usize = 8;
 const path_capacity: usize = r4os.path.file_path_max + 1;
 const max_dir_items: usize = 96;
-const dir_item_capacity: usize = 96;
 const max_wallpaper_file_bytes: usize = 32 * 1024 * 1024;
 
-pub fn r4_app_main(r4_app: *r4os.App) i32 {
-    if (!r4std.init(r4_app.startContext())) return r4os.abi.err_no_group;
+pub fn r4_app_main(r4_app: *r4os.App2) i32 {
+    if (!r4std.init2(r4_app.startContext())) return r4os.abi.err_no_group;
     var ctx = AppApi.init(r4_app) orelse return r4os.abi.err_no_group;
     if (hasArg(ctx.sys.argsRaw(), "/SELFTEST")) return runSelfTest(&ctx.sys);
     if (hasArg(ctx.sys.argsRaw(), "/DISPLAY")) return @import("display_ui.zig").run(ctx.sys, ctx.desk, ctx.draw, r4_app.startContext().instance_id, r4_app.startContext());
@@ -84,12 +87,14 @@ const App = struct {
     dialog_pressed_action: r4os.gui.DialogAction = .none,
     current_dir: [path_capacity]u8 = .{0} ** path_capacity,
     selected_path: [path_capacity]u8 = .{0} ** path_capacity,
-    directory_page: r4os.directory_page.DialogPage(max_dir_items, path_capacity, dir_item_capacity) = .{},
-    dir_items: [max_dir_items][dir_item_capacity]u8 = .{.{0} ** dir_item_capacity} ** max_dir_items,
+    picker_session: ?picker.Session = null,
+    picker_active: [max_dir_items]picker.Row = undefined,
+    picker_candidate: [max_dir_items]picker.Row = undefined,
     dir_item_slices: [max_dir_items][]const u8 = [_][]const u8{""} ** max_dir_items,
     dir_item_count: usize = 0,
 
     fn run(self: *App) i32 {
+        defer self.cancelPicker();
         if (self.ctx.desk.programWindowId() < 0) {
             self.ctx.sys.println("APPEARANCE is a desktop GUI application.");
             return 0;
@@ -102,13 +107,15 @@ const App = struct {
 
         var events = r4os.EventLoop.init(self.ctx.sys, self.ctx.desk, &.{});
         while (!self.ctx.sys.programShouldClose() and !self.should_exit) {
-            switch (events.wait(r4os.time_contract.timeoutForever())) {
+            if (self.pickerBusy() and self.advancePicker()) self.render();
+            const timeout = if (self.pickerBusy()) r4os.time_contract.timeoutFinite(.{ .nanoseconds = 1_000_000 }) else r4os.time_contract.timeoutForever();
+            switch (events.wait(timeout)) {
                 .message => |message| {
                     const event = message.guiEvent() orelse continue;
                     const kind: r4os.abi.GuiEventKind = @enumFromInt(event.kind);
                     switch (kind) {
                         .close => return 0,
-                        .resize => {
+                        .resize, .font_changed => {
                             self.updateMetrics();
                             self.render();
                         },
@@ -456,9 +463,22 @@ const App = struct {
     }
 
     fn openWallpaperDialog(self: *App) void {
-        if (self.current_dir[0] == 0) setZ(self.current_dir[0..], "C:\\");
-        if (!self.loadDirectory()) {
-            self.setStatus("Could not read the wallpaper directory.");
+        self.cancelPicker();
+        const binding = self.ctx.app.filePickerProvider();
+        if (binding.status != 0) {
+            self.setStatus("Wallpaper metadata provider unavailable.");
+            return;
+        }
+        var session: picker.Session = undefined;
+        if (picker.Session.init(&self.picker_active, &self.picker_candidate, picker.codes.mode_open, "", binding.provider, &session) != 0) {
+            self.setStatus("Wallpaper picker storage unavailable.");
+            return;
+        }
+        self.picker_session = session;
+        if (self.current_dir[0] == 0) setZ(&self.current_dir, "C:\\");
+        if (self.picker_session.?.begin(spanZ(&self.current_dir), 0) != 0) {
+            self.cancelPicker();
+            self.setStatus("Could not open the wallpaper directory.");
             return;
         }
         self.dialog_open = true;
@@ -466,47 +486,61 @@ const App = struct {
         self.dialog_first_index = 0;
         self.dialog_hover_index = null;
         self.dialog_pressed_action = .none;
-        self.setStatus("Choose a BMP or PNG image.");
+        self.setStatus("Reading wallpaper directory.");
+    }
+
+    fn cancelPicker(self: *App) void {
+        self.clearPickerItems();
+        if (self.picker_session) |*session| {
+            var decision: picker.Decision = undefined;
+            _ = session.cancel(&decision);
+        }
+        self.picker_session = null;
+    }
+
+    fn clearPickerItems(self: *App) void {
+        self.dir_item_count = 0;
+        self.dir_item_slices = @splat("");
+    }
+
+    fn projectPicker(self: *App) void {
+        const session = &(self.picker_session orelse return);
+        const rows = session.rows() orelse return;
+        self.dir_item_count = rows.len;
+        for (rows, 0..) |*row, index| self.dir_item_slices[index] = spanZ(&row.label);
+        setZ(&self.current_dir, spanZ(&session.directory_path));
+    }
+
+    fn pickerBusy(self: *const App) bool {
+        const session = &(self.picker_session orelse return false);
+        var progress: picker.Progress = undefined;
+        return session.progress(&progress) == 0 and progress.flags & 2 != 0;
+    }
+
+    fn advancePicker(self: *App) bool {
+        if (self.picker_session) |*session| {
+            self.clearPickerItems();
+            const result = session.step(32);
+            self.projectPicker();
+            if (result != 0) {
+                self.setStatus("Directory changed or unreadable. Reopen the picker.");
+                return true;
+            } else if (!self.pickerBusy()) {
+                self.dialog_selected_index = 0;
+                self.dialog_first_index = 0;
+                self.dialog_hover_index = null;
+                self.setStatus("Choose a BMP or PNG image.");
+                return true;
+            }
+        }
+        return false;
     }
 
     fn closeWallpaperDialog(self: *App, status_text: []const u8) void {
+        self.cancelPicker();
         self.dialog_open = false;
         self.dialog_pressed_action = .none;
         self.setStatus(status_text);
-    }
-
-    fn loadDirectory(self: *App) bool {
-        return self.loadDirectoryPage(0);
-    }
-
-    fn loadDirectoryPage(self: *App, number: u32) bool {
-        const path = r4os.app_storage.PathZ{ .ptr = zptr(self.current_dir[0..]), .len = @intCast(spanZ(self.current_dir[0..]).len) };
-        if (!self.directory_page.load(.{ .sys = self.ctx.sys }, path, number, "")) {
-            if (self.directory_page.count != 0) setZ(self.current_dir[0..], spanZ(self.directory_page.directory[0..]));
-            return false;
-        }
-        self.dir_item_count = self.directory_page.count;
-        for (self.directory_page.rows[0..self.dir_item_count], 0..) |row, index| {
-            self.dir_items[index] = row.label;
-            self.dir_item_slices[index] = spanZ(self.dir_items[index][0..]);
-        }
-        return true;
-    }
-
-    fn navigateDirectoryPage(self: *App, index: usize) bool {
-        if (index >= self.directory_page.count) return false;
-        const number = switch (self.directory_page.rows[index].kind) {
-            .previous => self.directory_page.number -| 1,
-            .next => self.directory_page.number + 1,
-            else => return false,
-        };
-        if (self.loadDirectoryPage(number)) {
-            self.dialog_selected_index = 0;
-            self.dialog_first_index = 0;
-            self.dialog_hover_index = null;
-            self.setStatus("Opened directory page");
-        } else self.setStatus("Directory read failed; previous view retained");
-        return true;
     }
 
     fn fileDialog(self: *const App) r4os.gui.FileDialog {
@@ -526,57 +560,40 @@ const App = struct {
         };
     }
 
-    fn resolveDirEntry(self: *App, index: usize) i32 {
-        if (index >= self.directory_page.count) return -1;
-        const row = &self.directory_page.rows[index];
-        setZ(self.selected_path[0..], spanZ(row.path[0..]));
-        return switch (row.kind) {
-            .file => 0,
-            .directory => 1,
-            else => -1,
-        };
-    }
-
-    fn selectDirEntry(self: *App, display_index: usize) void {
-        if (self.navigateDirectoryPage(display_index)) return;
-        const kind = self.resolveDirEntry(display_index);
-        if (kind < 0) {
-            self.setStatus("Could not resolve the selected item.");
-            return;
-        }
-        if (kind > 0) {
-            setZ(self.current_dir[0..], spanZ(self.selected_path[0..]));
-            if (self.loadDirectory()) {
-                self.dialog_selected_index = 0;
-                self.dialog_first_index = 0;
-                self.setStatus("Choose a BMP wallpaper.");
-            } else {
-                self.setStatus("Could not open the selected folder.");
-            }
-            return;
-        }
-        self.setStatus("Press Open to use the selected BMP.");
+    fn selectDirEntry(self: *App, index: usize) void {
+        self.activatePicker(index, false);
     }
 
     fn acceptDialogSelection(self: *App) void {
-        if (self.navigateDirectoryPage(self.dialog_selected_index)) return;
-        if (self.dir_item_count == 0) {
-            self.setStatus("No BMP file is available in this folder.");
+        self.activatePicker(self.dialog_selected_index, true);
+    }
+
+    fn activatePicker(self: *App, index: usize, accept_file: bool) void {
+        if (self.pickerBusy() or index >= self.dir_item_count) return;
+        const session = if (self.picker_session) |*value| value else return;
+        self.clearPickerItems();
+        const selected = session.select(session.revision, @intCast(index), @intCast(max_dir_items));
+        var decision: picker.Decision = .{};
+        const result = if (selected == 0) session.activate(session.revision, false, false, &decision) else selected;
+        self.projectPicker();
+        if (result != 0) {
+            self.setStatus("Selection changed or unavailable. Reopen the picker.");
             return;
         }
-        const kind = self.resolveDirEntry(self.dialog_selected_index);
-        if (kind < 0) {
-            self.setStatus("Could not resolve the selected item.");
+        if (decision.kind == picker.codes.decision_none) {
+            self.setStatus("Reading wallpaper directory.");
             return;
         }
-        if (kind > 0) {
-            self.selectDirEntry(self.dialog_selected_index);
+        if (decision.kind != picker.codes.decision_file) return;
+        setZ(&self.selected_path, spanZ(&decision.entry.path));
+        if (!accept_file) {
+            self.setStatus("Press Open to select the wallpaper.");
             return;
         }
-        if (!self.validateWallpaper(spanZ(self.selected_path[0..]))) return;
-        setZ(self.wallpaper_path[0..], spanZ(self.selected_path[0..]));
-        self.setCurrentDirFromPath(spanZ(self.wallpaper_path[0..]));
-        self.closeWallpaperDialog("BMP selected. Press Apply to save.");
+        if (!self.validateWallpaper(spanZ(&self.selected_path))) return;
+        setZ(&self.wallpaper_path, spanZ(&self.selected_path));
+        self.setCurrentDirFromPath(spanZ(&self.wallpaper_path));
+        self.closeWallpaperDialog("Image selected. Press Apply to save.");
     }
 
     fn handleFileDialogKey(self: *App, key: u8) void {
@@ -630,15 +647,20 @@ const App = struct {
         }
         var path_storage: [path_capacity]u8 = .{0} ** path_capacity;
         setZ(path_storage[0..], path);
-        const info = self.ctx.sys.fileInfo(zptr(path_storage[0..])) orelse {
-            self.setStatus("The selected wallpaper file is missing.");
-            return false;
+        const files = r4os.app_storage.Files{ .sys = self.ctx.sys };
+        const file_path = r4os.app_storage.PathZ{ .ptr = zptr(&path_storage), .len = @intCast(path.len) };
+        const info = switch (files.metadata(file_path)) {
+            .found => |value| value,
+            else => {
+                self.setStatus("The selected wallpaper file is missing or unavailable.");
+                return false;
+            },
         };
-        if (info.is_dir != 0 or info.size == 0 or info.size > max_wallpaper_file_bytes) {
+        if (info.flags & r4os.abi.file_metadata2_flag_directory != 0 or info.flags & r4os.abi.file_metadata2_flag_byte_size_valid == 0 or info.byte_size == 0 or info.byte_size > max_wallpaper_file_bytes) {
             self.setStatus("The wallpaper image is empty or too large.");
             return false;
         }
-        const length: usize = @intCast(info.size);
+        const length: usize = @intCast(info.byte_size);
         const allocator = self.ctx.sys.allocator();
         const bytes = allocator.alloc(u8, length) catch {
             self.setStatus("Not enough memory to check the wallpaper.");
@@ -648,6 +670,17 @@ const App = struct {
         const read = self.ctx.sys.fileRead(zptr(path_storage[0..]), bytes);
         if (read != @as(i32, @intCast(length))) {
             self.setStatus("Could not read the wallpaper image.");
+            return false;
+        }
+        const observed = switch (files.metadata(file_path)) {
+            .found => |value| value,
+            else => {
+                self.setStatus("The wallpaper identity became unavailable.");
+                return false;
+            },
+        };
+        if (!std.meta.eql(info, observed)) {
+            self.setStatus("The wallpaper changed while reading.");
             return false;
         }
         const image_info = self.ctx.img.probe(bytes, "") catch {
@@ -832,6 +865,81 @@ fn saveAppearanceConfig(ctx: *const r4os.r4sys.Context, path: [*:0]const u8, col
     writer.writePair("WALLPAPER_MODE", "CENTER");
     if (!writer.ok()) return r4std.config.error_buffer_too_small;
     return r4std.config.saveDocument(ctx, path, writer.bytes());
+}
+
+test "migration wallpaper picker retains complete pages and selection remains unsaved" {
+    const a = r4os.abi;
+    const Peer = struct {
+        var fail = false;
+        var byte_size: u64 = 0x1_0000_0001;
+        fn metadata(path: [*:0]const u8, output: *a.FileMetadata2) callconv(.c) i32 {
+            if (fail) return -777;
+            const file = std.mem.endsWith(u8, std.mem.span(path), ".BMP");
+            output.* = .{
+                .flags = a.file_metadata2_flag_exists | a.file_metadata2_flag_identity_valid | a.file_metadata2_flag_byte_size_valid | (if (file) 0 else a.file_metadata2_flag_directory),
+                .identity = .{ .mount_slot = 4, .mount_generation = 0x1_0000_0001, .namespace_generation = 0x2_0000_0001, .object_hi = 0x3_0000_0001, .object_lo = if (file) 2 else 1, .flags = a.file_identity2_flag_namespace },
+                .byte_size = if (file) byte_size else 0,
+            };
+            return 1;
+        }
+        fn batch(_: ?[*:0]const u8, cursor: *a.DirectoryMetadataCursor2, output: ?[*]a.DirectoryMetadataEntry2, count: u32) callconv(.c) i32 {
+            if (fail) return a.file_metadata2_error_restart;
+            cursor.namespace_generation = 0x2_0000_0001;
+            cursor.flags = a.directory_metadata2_flag_bound;
+            cursor.scan.change = .{ .mount_slot = 4, .mount_generation = 0x1_0000_0001, .sequence = 1 };
+            if (count == 0) return 0;
+            const index = cursor.scan.backend[0];
+            if (index >= 2) return a.file_metadata2_result_end;
+            var entry: a.DirectoryMetadataEntry2 = .{};
+            const path = if (index == 0) "C:\\A.BMP" else "C:\\DIR";
+            _ = r4os.bounded_text.assignZ(&entry.path, path);
+            if (metadata(@ptrCast(&entry.path), &entry.info) != 1) return -777;
+            output.?[0] = entry;
+            cursor.scan.backend[0] += 1;
+            return 1;
+        }
+    };
+    Peer.fail = false;
+    Peer.byte_size = 0x1_0000_0001;
+    const platform = r4os.platform2;
+    var table = platform.abi.R4XStartR4Sys2{ .file_metadata2 = @intFromPtr(&Peer.metadata), .directory_metadata_batch2 = @intFromPtr(&Peer.batch) };
+    const imports = [_]platform.abi.R4XStartImport{.{ .group_id = 1, .resolved_version = 2, .table = @intFromPtr(&table) }};
+    const raw = platform.abi.R4XStartContext2{ .import_count = 1, .imports = @intFromPtr(&imports) };
+    const context = try platform.Context.init(&raw);
+    var app_context = r4os.App2{ .raw = &raw, .context = context, .memory = .{ .identity = @intFromPtr(&table) }, .profile = .desktop };
+    var api = AppApi{ .app = &app_context, .sys = app_context.system(), .desk = undefined, .draw = undefined, .img = undefined };
+    const app = try std.testing.allocator.create(App);
+    defer std.testing.allocator.destroy(app);
+    app.* = .{ .ctx = &api };
+    setZ(&app.wallpaper_path, "C:\\BEFORE.PNG");
+    app.openWallpaperDialog();
+    try std.testing.expect(app.pickerBusy());
+    try std.testing.expect(app.advancePicker());
+    try std.testing.expectEqual(@as(usize, 3), app.dir_item_count);
+    {
+        const rows = app.picker_session.?.rows().?;
+        try std.testing.expectEqualStrings("[DIR] ..", std.mem.sliceTo(&rows[0].label, 0));
+        try std.testing.expectEqual(@as(u64, 0x1_0000_0001), rows[1].entry.info.byte_size);
+        try std.testing.expectEqual(@as(u64, 0x3_0000_0001), rows[1].entry.info.identity.object_hi);
+    }
+    app.selectDirEntry(1);
+    try std.testing.expectEqualStrings("C:\\A.BMP", spanZ(&app.selected_path));
+    try std.testing.expectEqualStrings("C:\\BEFORE.PNG", spanZ(&app.wallpaper_path));
+    app.selectDirEntry(2);
+    try std.testing.expect(app.pickerBusy());
+    Peer.fail = true;
+    try std.testing.expect(app.advancePicker());
+    try std.testing.expectEqual(@as(usize, 3), app.dir_item_count);
+    try std.testing.expectEqualStrings("A.BMP", app.dir_item_slices[1]);
+    try std.testing.expectEqualStrings("C:\\", spanZ(&app.current_dir));
+    try std.testing.expectEqualStrings("C:\\BEFORE.PNG", spanZ(&app.wallpaper_path));
+    app.closeWallpaperDialog("Cancelled");
+    try std.testing.expect(!app.dialog_open and app.picker_session == null and app.dir_item_count == 0);
+    Peer.fail = false;
+    Peer.byte_size = 4096;
+    try std.testing.expect(!app.validateWallpaper("C:\\A.BMP"));
+    try std.testing.expectEqualStrings("Not enough memory to check the wallpaper.", spanZ(&app.status));
+    try std.testing.expectEqualStrings("C:\\BEFORE.PNG", spanZ(&app.wallpaper_path));
 }
 
 fn paletteIndex(color: u32) ?usize {

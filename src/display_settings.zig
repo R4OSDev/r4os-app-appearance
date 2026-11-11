@@ -10,7 +10,7 @@ const Button = enum { monitor, mode_previous, mode_next, scale_down, scale_up, r
 const all_buttons = std.enums.values(Button);
 const scales = [_]u32{ 60, 90, 120, 150, 180, 210, 240, 300, 360, 480 };
 const face = r4os.gui.default_palette.face;
-pub fn run(sys: r4os.r4sys.Context, desk: r4os.r4desk.Context, draw: r4os.r4draw.Context, instance: u64, raw: *const a.R4XStartContext) ?i32 {
+pub fn run(sys: r4os.r4sys.Context, desk: r4os.r4desk.Context, draw: r4os.r4draw.Context, instance: u64, raw: *const r4os.platform2.abi.R4XStartContext2) ?i32 {
     var client = control.Client.init(&sys, instance) orelse return null;
     if (!client.poll(&sys) or client.state.flags & 1 == 0) return null;
     const layout = control.decode(&client.state.layout) catch return null;
@@ -23,7 +23,7 @@ const App = struct {
     draw: r4os.r4draw.Context,
     client: control.Client,
     edit: topology.Layout,
-    raw: ?*const a.R4XStartContext = null,
+    raw: ?*const r4os.platform2.abi.R4XStartContext2 = null,
     snapshot: catalog.Snapshot = .{},
     modes: [a.gfx_output_max_modes]a.GfxOutputMode = @splat(.{}),
     mode_count: usize = 0,
@@ -54,7 +54,7 @@ const App = struct {
             switch (events.wait(r4os.time_contract.timeoutFinite(.{ .nanoseconds = delay * std.time.ns_per_ms }))) {
                 .message => |message| if (message.guiEvent()) |event| switch (@as(a.GuiEventKind, @enumFromInt(event.kind))) {
                     .close => self.exiting = true,
-                    .resize => self.metrics(),
+                    .resize, .font_changed => self.metrics(),
                     .key_down => self.key(@intCast(event.key & 0xff)),
                     .input_reset, .focus_lost => {
                         redraw = self.pressed != null or self.dragging != null;

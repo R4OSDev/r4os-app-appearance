@@ -30,7 +30,7 @@ pub fn run(sys: r4os.r4sys.Context, desk: r4os.r4desk.Context, draw: r4os.r4draw
                     app.exiting = true;
                     app.close_window = true;
                 },
-                .resize => app.metrics(),
+                .resize, .font_changed => app.metrics(),
                 .key_down => app.keypress(@intCast(event.key & 255)),
                 .input_reset, .focus_lost => {
                     redraw = app.pressed != null;

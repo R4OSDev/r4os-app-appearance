@@ -8,9 +8,11 @@ test "display selection retains common ownership and waits for real decisions" {
     const r4os = @import("r4os");
     const a = r4os.abi;
     const original: a.DisplayStateInfo = .{ .revision = 5, .device_generation = 7, .driver_owner = 2, .adapter_id = 0x01000100 };
-    var changed = original; changed.device_generation += 1;
+    var changed = original;
+    changed.device_generation += 1;
     try std.testing.expect(!r4os.graphics_status.sameOwner(original, changed));
-    changed = original; changed.revision += 1;
+    changed = original;
+    changed.revision += 1;
     try std.testing.expect(!r4os.graphics_status.sameOwner(original, changed));
     var status: r4os.graphics_status.Snapshot = .{ .display = original };
     var line: [224]u8 = undefined;

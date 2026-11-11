@@ -44,3 +44,12 @@ der wiederhergestellte Inhalt gelesen. Lese-/Groessenfehler verhindern das
 Speichern. Die vier Appearance-Werte werden gemeinsam komponiert; andere
 Schluessel wie TASKBAR_CLOCK und UI_FONT bleiben erhalten. Publikation
 verwendet weiterhin R4STD CONFIG_V1 saveDocument.
+
+API-Migration 0.90.67
+---------------------
+Appearance32 verwendet App2/Query2 und den gemeinsamen FilePicker mit zwei
+96-Zeilen-Puffern. Begrenzte Schritte laufen im EventLoop. Fehlgeschlagene
+Navigation erhaelt die vorherige vollstaendige Seite. Ganze FileMetadata2-
+Werte werden vor und nach dem begrenzten Bildlesen geprueft. Auswahl bleibt
+bis Apply/OK im Fenster. Fontwechsel baut Canvas und Layout neu auf.
+Die Fachinterfaces und Dateiformate behalten ihre bisherigen Versionen.
