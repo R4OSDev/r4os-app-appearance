@@ -130,3 +130,36 @@ test "wallpaper dimensions include Full HD and enforce the decode bound" {
     try std.testing.expect(!wallpaperDimensionsAllowed(4097, 2160));
     try std.testing.expect(!wallpaperDimensionsAllowed(640, 0));
 }
+
+pub const DesktopSettings = struct {
+    background: u32 = default_desktop_bg,
+    icon_text: u32 = default_desktop_icon_text,
+    read_error: bool = false,
+
+    pub fn load(ctx: anytype, wallpaper: []u8) DesktopSettings {
+        const stdlib = @import("r4std");
+        const settings = stdlib.settings;
+        var view: DesktopSettings = .{};
+        @memset(wallpaper, 0);
+        var buffer: [stdlib.config.max_file_bytes]u8 = undefined;
+        const count = ctx.fileRead(settings.paths.desktop, &buffer);
+        // FileRead returns -3 for a missing settings file.
+        if (count == -3 or count == 0) return view;
+        if (count < 0 or count > buffer.len) return .{ .read_error = true };
+        const bytes = buffer[0..@intCast(count)];
+        _ = settings.parseSystemText(bytes) catch return .{ .read_error = true };
+        const doc = settings.Document.init(bytes);
+        if (doc.formatVersion()) |format| {
+            if (format != settings.current_format_version) return .{ .read_error = true };
+        }
+        view.background = doc.rgb24Value("DESKTOP_BG") orelse default_desktop_bg;
+        view.icon_text = doc.rgb24Value("DESKTOP_ICON_TEXT") orelse default_desktop_icon_text;
+        const path = doc.value("WALLPAPER") orelse "NONE";
+        if (path.len >= wallpaper.len) {
+            view.read_error = true;
+        } else {
+            @memcpy(wallpaper[0..path.len], path);
+        }
+        return view;
+    }
+};

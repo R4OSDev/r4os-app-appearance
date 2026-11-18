@@ -139,18 +139,15 @@ const App = struct {
     }
 
     fn load(self: *App) void {
-        var color = model.default_desktop_bg;
-        const rc = r4std.config.readRgb24(&self.ctx.sys, r4std.settings.paths.desktop, "DESKTOP_BG", model.default_desktop_bg, &color);
-        var icon_text_color = model.default_desktop_icon_text;
-        const icon_rc = r4std.config.readRgb24(&self.ctx.sys, r4std.settings.paths.desktop, "DESKTOP_ICON_TEXT", model.default_desktop_icon_text, &icon_text_color);
-        var wallpaper_value: [path_capacity]u8 = .{0} ** path_capacity;
-        const wallpaper_rc = r4std.config.readString(&self.ctx.sys, r4std.settings.paths.desktop, "WALLPAPER", "NONE", wallpaper_value[0..]);
-        self.selected_color = color;
-        self.saved_color = color;
-        self.icon_text_color = icon_text_color;
-        self.saved_icon_text_color = icon_text_color;
-        self.selected_swatch = paletteIndex(color);
-        if (wallpaper_rc >= 0 and !equalsIgnoreCase(spanZ(wallpaper_value[0..]), "NONE")) {
+        var wallpaper_value: [path_capacity]u8 = undefined;
+        const settings = model.DesktopSettings.load(&self.ctx.sys, &wallpaper_value);
+        self.selected_color = settings.background;
+        self.saved_color = settings.background;
+        self.icon_text_color = settings.icon_text;
+        self.saved_icon_text_color = settings.icon_text;
+        self.selected_swatch = paletteIndex(settings.background);
+        self.wallpaper_path[0] = 0;
+        if (!equalsIgnoreCase(spanZ(&wallpaper_value), "NONE")) {
             const parsed = r4os.path.AbsoluteFilePath.parse(spanZ(wallpaper_value[0..])) catch null;
             if (parsed) |path| {
                 if (model.hasWallpaperExtension(path.bytes())) setZ(self.wallpaper_path[0..], path.bytes());
@@ -159,7 +156,7 @@ const App = struct {
         setZ(self.saved_wallpaper_path[0..], spanZ(self.wallpaper_path[0..]));
         self.setCurrentDirFromPath(spanZ(self.wallpaper_path[0..]));
         self.updateRgbText();
-        self.setStatus(if (rc < 0 or icon_rc < 0 or wallpaper_rc < 0) "Could not read desktop settings." else "Choose a desktop color, icon text color or wallpaper.");
+        self.setStatus(if (settings.read_error) "Could not read desktop settings." else "Choose a desktop color, icon text color or wallpaper.");
     }
 
     fn updateMetrics(self: *App) void {
